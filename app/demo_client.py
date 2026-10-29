@@ -56,6 +56,13 @@ class DemoClient:
                 r = self.s.request(method, f"{tc.DEMO_BASE}{path}?{q}", timeout=15)
             except requests.RequestException as e:
                 last = e
+                # Duplicate recovery: if an order timed out, check if it was accepted
+                cid = p.get("newClientOrderId")
+                if method == "POST" and path == "/fapi/v1/order" and cid:
+                    recovered = self.check_order_exists(p.get("symbol"), cid)
+                    if recovered:
+                        log.info(f"Recovered order {cid} for {p.get('symbol')} after network timeout: {e}")
+                        return recovered
                 time.sleep(1.5 * (attempt + 1))
                 continue
             try:
@@ -70,10 +77,37 @@ class DemoClient:
                 if code == -1021:
                     self.sync_time()
                     continue
+                # If duplicate order error occurs on retry, recover the original order
+                cid = p.get("newClientOrderId")
+                if method == "POST" and path == "/fapi/v1/order" and cid:
+                    recovered = self.check_order_exists(p.get("symbol"), cid)
+                    if recovered:
+                        log.info(f"Recovered order {cid} for {p.get('symbol')} on duplicate response: {code}")
+                        return recovered
                 msg = data.get("msg") if isinstance(data, dict) else r.text[:200]
                 raise DemoError(code, msg, r.status_code)
             return data
         raise RuntimeError(f"Demo API failed: {path} {last}")
+
+    def query_order(self, symbol, order_id=None, orig_client_order_id=None):
+        p = {"symbol": symbol}
+        if order_id is not None:
+            p["orderId"] = order_id
+        if orig_client_order_id is not None:
+            p["origClientOrderId"] = orig_client_order_id
+        return self._req("GET", "/fapi/v1/order", p)
+
+    def check_order_exists(self, symbol, client_order_id):
+        try:
+            return self.query_order(symbol, orig_client_order_id=client_order_id)
+        except DemoError as e:
+            if e.code == -2013:  # Order does not exist
+                return None
+            log.warning(f"check_order_exists {symbol} {client_order_id}: {e}")
+            return None
+        except Exception as e:
+            log.warning(f"check_order_exists error {symbol} {client_order_id}: {e}")
+            return None
 
     # ---------------- account
     def balance(self):
@@ -102,6 +136,19 @@ class DemoClient:
         return self._req("GET", "/fapi/v1/userTrades",
                          {"symbol": symbol, "startTime": int(start_ms), "limit": 1000})
 
+    def open_orders(self, symbol=None):
+        p = {"symbol": symbol} if symbol else {}
+        return self._req("GET", "/fapi/v1/openOrders", p)
+
+    def algo_open_orders(self, symbol=None):
+        p = {"symbol": symbol} if symbol else {}
+        try:
+            return self._req("GET", "/fapi/v1/algoOpenOrders", p)
+        except DemoError as e:
+            if e.status in (404, 405):
+                return []
+            raise
+
     # ---------------- orders
     def set_margin(self, symbol):
         try:
@@ -113,17 +160,23 @@ class DemoClient:
     def set_leverage(self, symbol, lev):
         return self._req("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": lev})
 
-    def market(self, symbol, side, qty, reduce=False):
+    def market(self, symbol, side, qty, reduce=False, client_order_id=None):
+        if not client_order_id:
+            client_order_id = f"m_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
         p = {"symbol": symbol, "side": side, "type": "MARKET",
-             "quantity": dstr(qty), "newOrderRespType": "RESULT"}
+             "quantity": dstr(qty), "newOrderRespType": "RESULT",
+             "newClientOrderId": client_order_id}
         if reduce:
             p["reduceOnly"] = "true"
         return self._req("POST", "/fapi/v1/order", p)
 
-    def conditional(self, symbol, side, otype, trigger):
+    def conditional(self, symbol, side, otype, trigger, client_algo_id=None):
         """SL / TP. Notun Algo endpoint age, na hole purono endpoint."""
+        if not client_algo_id:
+            client_algo_id = f"a_{int(time.time() * 1000)}_{os.urandom(3).hex()}"
         p = {"algoType": "CONDITIONAL", "symbol": symbol, "side": side, "type": otype,
-             "triggerPrice": dstr(trigger), "closePosition": "true", "workingType": "MARK_PRICE"}
+             "triggerPrice": dstr(trigger), "closePosition": "true", "workingType": "MARK_PRICE",
+             "clientAlgoId": client_algo_id}
         try:
             return self._req("POST", "/fapi/v1/algoOrder", p)
         except DemoError as e:
@@ -131,7 +184,8 @@ class DemoClient:
                 raise
             log.warning(f"algoOrder endpoint nai ({e}), purono /order try korchi")
             q = {"symbol": symbol, "side": side, "type": otype, "stopPrice": dstr(trigger),
-                 "closePosition": "true", "workingType": "MARK_PRICE"}
+                 "closePosition": "true", "workingType": "MARK_PRICE",
+                 "newClientOrderId": client_algo_id}
             return self._req("POST", "/fapi/v1/order", q)
 
     def cancel_conditionals(self, symbol):

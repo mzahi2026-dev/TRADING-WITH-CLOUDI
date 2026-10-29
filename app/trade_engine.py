@@ -139,7 +139,7 @@ class Engine:
                     break
                 time.sleep(10)
 
-            open_syms = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE status='OPEN'")}
+            open_syms = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')")}
             cutoff = int(time.time() * 1000) - tc.COOLDOWN_HOURS * 3600 * 1000
             cool = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE entry_ms>=?", (cutoff,))}
             n_open = len(open_syms)
@@ -218,13 +218,31 @@ class Engine:
 
     # ------------------------------------------------------------ execute
     def try_cond(self, sym, side, otype, trigger):
-        for _ in range(2):
+        for attempt in range(3):
             try:
                 self.dc.conditional(sym, side, otype, trigger)
                 return True
             except Exception as e:
-                log.error(f"{otype} {sym} @ {trigger} failed: {e}")
-                time.sleep(1)
+                log.warning(f"{otype} {sym} @ {trigger} attempt {attempt + 1}/3 failed: {e}")
+                time.sleep(1.0)
+        return False
+
+    def emergency_close(self, sym, side, amt):
+        cs = "SELL" if side == "LONG" else "BUY"
+        for att in range(3):
+            try:
+                log.warning(f"Emergency close attempt {att + 1}/3 for {sym} {cs} qty {amt}")
+                self.dc.market(sym, cs, Decimal(str(amt)), reduce=True)
+                time.sleep(1.0)
+                pos = [p for p in self.dc.positions() if p["symbol"] == sym]
+                rem = abs(float(pos[0]["positionAmt"])) if pos else 0.0
+                if rem == 0:
+                    log.info(f"Emergency close successful for {sym}")
+                    return True
+                amt = rem
+            except Exception as e:
+                log.error(f"Emergency close error {sym} attempt {att + 1}: {e}")
+                time.sleep(1.0)
         return False
 
     def execute(self, sym, side, atr, name, mid):
@@ -249,16 +267,30 @@ class Engine:
         t_before = int(time.time() * 1000)
         bs = "BUY" if side == "LONG" else "SELL"
         cs = "SELL" if side == "LONG" else "BUY"
+        cid = f"ent_{sym}_{int(time.time() * 1000)}"
+        order = None
         try:
-            order = self.dc.market(sym, bs, q)
-            time.sleep(1.0)
-            entry = float(order.get("avgPrice") or 0)
-            pos = [p for p in self.dc.positions() if p["symbol"] == sym]
-            amt = abs(float(pos[0]["positionAmt"])) if pos else 0.0
-            if entry <= 0 and pos:
-                entry = float(pos[0]["entryPrice"])
+            order = self.dc.market(sym, bs, q, client_order_id=cid)
         except Exception as e:
-            return False, f"market order: {e}"
+            log.warning(f"{sym}: Market order exception ({e}). Checking exchange position...")
+            time.sleep(1.0)
+            try:
+                pos = [p for p in self.dc.positions() if p["symbol"] == sym]
+                amt_check = abs(float(pos[0]["positionAmt"])) if pos else 0.0
+                if amt_check > 0:
+                    log.info(f"{sym}: Recovered position ({amt_check}) despite market order error")
+                    order = {"avgPrice": float(pos[0].get("entryPrice") or mid), "executedQty": amt_check}
+                else:
+                    return False, f"market order: {e}"
+            except Exception as pos_e:
+                return False, f"market order: {e} (pos check error: {pos_e})"
+
+        time.sleep(0.5)
+        entry = float(order.get("avgPrice") or 0)
+        pos = [p for p in self.dc.positions() if p["symbol"] == sym]
+        amt = abs(float(pos[0]["positionAmt"])) if pos else 0.0
+        if entry <= 0 and pos:
+            entry = float(pos[0]["entryPrice"])
         if amt == 0:
             return False, "order er por position paini"
         if entry <= 0:
@@ -268,12 +300,20 @@ class Engine:
         sl = rt(entry - k * tc.SL_ATR * atr, tick)
         tp = rt(entry + k * tc.TP_ATR * atr, tick)
         if not self.try_cond(sym, cs, "STOP_MARKET", sl):
-            log.error(f"{sym}: SL boshate parlam na, position close kortechi")
-            try:
-                self.dc.market(sym, cs, Decimal(str(amt)), reduce=True)
-            except Exception as e:
-                log.critical(f"{sym}: EMERGENCY CLOSE FAILED: {e}. Manually dekhun!")
-            return False, "SL order fail, position close kora holo"
+            log.error(f"{sym}: SL boshate parlam na! Attempting emergency close...")
+            if self.emergency_close(sym, side, amt):
+                log.info(f"{sym}: Position successfully closed due to SL failure")
+                return False, "SL order fail, position emergency close kora holo"
+            else:
+                log.critical(f"{sym}: EMERGENCY CLOSE FAILED! Position is OPEN without SL! Tracking as EMERGENCY_UNPROTECTED")
+                con = self.db()
+                con.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
+                            "VALUES (?,?,?,?,?,?,?,?,'EMERGENCY_UNPROTECTED',?)",
+                            (bdt(), sym, name, side, entry, sl, tp, amt, t_before))
+                con.commit()
+                con.close()
+                return False, "CRITICAL: SL fail and emergency close fail! Tracked as EMERGENCY_UNPROTECTED"
+
         tp_ok = self.try_cond(sym, cs, "TAKE_PROFIT_MARKET", tp)
         if not tp_ok:
             log.warning(f"{sym}: TP boshe ni, shudhu SL ache")
@@ -304,23 +344,36 @@ class Engine:
             return
         con = self.db()
         try:
-            rows = con.execute("SELECT id, symbol, side, entry, sl, tp, entry_ms FROM positions "
-                               "WHERE status='OPEN'").fetchall()
+            rows = con.execute("SELECT id, symbol, side, entry, sl, tp, entry_ms, status FROM positions "
+                               "WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')").fetchall()
             try:
                 pos = self.dc.positions()
             except Exception as e:
                 log.warning(f"positions fetch failed: {e}")
                 return
             amt = {p["symbol"]: float(p["positionAmt"]) for p in pos}
-            if startup:
-                tracked = {r[1] for r in rows}
-                for s, a in amt.items():
-                    if a != 0 and s not in tracked:
-                        log.warning(f"Untracked demo position: {s} amt={a}")
-            for (pid, sym, side, entry, sl, tp, ems) in rows:
-                if sym not in amt or abs(amt[sym]) > 0:
+            tracked = {r[1] for r in rows}
+            for s, a in amt.items():
+                if a != 0 and s not in tracked:
+                    log.warning(f"Untracked demo position: {s} amt={a}")
+            for row in rows:
+                pid, sym, side, entry, sl, tp, ems, status = row
+                cur_amt = abs(amt.get(sym, 0.0))
+                if cur_amt == 0:
+                    self.close_row(con, pid, sym, side, entry, sl, tp, ems)
                     continue
-                self.close_row(con, pid, sym, side, entry, sl, tp, ems)
+
+                if status == "EMERGENCY_UNPROTECTED":
+                    cs = "SELL" if side == "LONG" else "BUY"
+                    log.warning(f"Reconcile handling EMERGENCY_UNPROTECTED position for {sym}...")
+                    if self.try_cond(sym, cs, "STOP_MARKET", sl):
+                        con.execute("UPDATE positions SET status='OPEN' WHERE id=?", (pid,))
+                        con.commit()
+                        log.info(f"{sym}: Successfully protected emergency position with SL {sl}")
+                    else:
+                        log.critical(f"{sym}: Reconcile could not set SL, trying emergency close...")
+                        if self.emergency_close(sym, side, cur_amt):
+                            self.close_row(con, pid, sym, side, entry, sl, tp, ems)
         finally:
             con.close()
 
