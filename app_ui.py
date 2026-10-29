@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import threading
 import time
@@ -7,8 +8,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 
 from app import config
 
@@ -17,6 +18,21 @@ SHIFT = 6 * 3600          # chart e BDT dekhanor jonno
 INDEX = Path(__file__).parent / "static" / "index.html"
 app = FastAPI()
 JOBS = {}
+
+DASHBOARD_TOKEN = os.getenv("DASHBOARD_TOKEN", "").strip()
+
+
+def check_auth(request: Request):
+    if not DASHBOARD_TOKEN:
+        return True
+    token = request.headers.get("X-API-KEY") or request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+    if token == DASHBOARD_TOKEN:
+        return True
+    if request.query_params.get("token") == DASHBOARD_TOKEN:
+        return True
+    if request.cookies.get("dashboard_token") == DASHBOARD_TOKEN:
+        return True
+    raise HTTPException(status_code=401, detail="Unauthorized: invalid or missing dashboard token")
 
 
 def db():
@@ -47,7 +63,18 @@ def ser(t, v):
 
 
 @app.get("/")
-def index():
+def index(request: Request, response: Response):
+    token = request.query_params.get("token")
+    if DASHBOARD_TOKEN:
+        if token == DASHBOARD_TOKEN:
+            res = FileResponse(str(INDEX))
+            res.set_cookie("dashboard_token", token, max_age=86400 * 7, httponly=True)
+            return res
+        if request.cookies.get("dashboard_token") != DASHBOARD_TOKEN:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized. Pass ?token=YOUR_TOKEN to authenticate."}
+            )
     return FileResponse(str(INDEX))
 
 
@@ -244,23 +271,69 @@ def health():
         "hint": "" if st == "ok" else "Scheduler (python scanner_main.py) bondho ba 1h candle nai. Fix: Hourly rank.",
         "fix": None if st == "ok" else "rank"})
 
-    items.append({"key": "signal", "name": "Signal Engine (15m)",
-                  "status": "idle" if not has_table(con, "signals") else "ok",
-                  "detail": "Step 3 ekhono install hoyni" if not has_table(con, "signals") else "chalu",
-                  "hint": "", "fix": None})
-    items.append({"key": "executor", "name": "Demo Executor",
-                  "status": "idle" if not has_table(con, "positions") else "ok",
-                  "detail": "Step 3 ekhono install hoyni" if not has_table(con, "positions") else "chalu",
-                  "hint": "", "fix": None})
+    # Signal engine health
+    sig_last = None
+    if has_table(con, "signals"):
+        sig_r = con.execute("SELECT MAX(time) FROM signals").fetchone()
+        sig_last = sig_r[0] if sig_r else None
+    items.append({
+        "key": "signal", "name": "Signal Engine (15m)",
+        "status": "idle" if not sig_last else "ok",
+        "detail": f"latest signal: {sig_last}" if sig_last else "waiting for 15m signals",
+        "hint": "", "fix": None
+    })
+
+    # Trader / Executor process health
+    trader_log_path = config.LOG_DIR / "trader.log"
+    trader_mtime = trader_log_path.stat().st_mtime if trader_log_path.exists() else None
+    trader_age = (now - trader_mtime) if trader_mtime else 1e9
+    if not trader_mtime:
+        ex_st = "idle"
+        ex_detail = "trader.log not found (trade_main.py chalu hoyni)"
+        ex_hint = "python trade_main.py chalan"
+    elif trader_age <= 1200:
+        ex_st = "ok"
+        ex_detail = f"active | last cycle {int(trader_age // 60)}m ago"
+        ex_hint = ""
+    elif trader_age <= 3600:
+        ex_st = "warn"
+        ex_detail = f"delayed | last cycle {int(trader_age // 60)}m ago"
+        ex_hint = "Trader loop slow ba delayed"
+    else:
+        ex_st = "bad"
+        ex_detail = f"stale | last cycle {int(trader_age // 60)}m ago"
+        ex_hint = "Trader bondho ba crash koreche. python trade_main.py restart korun."
+
+    items.append({
+        "key": "executor", "name": "Trader Engine",
+        "status": ex_st,
+        "detail": ex_detail,
+        "hint": ex_hint, "fix": None
+    })
+
+    # Alert if any emergency unprotected position exists
+    if has_table(con, "positions"):
+        unprot = con.execute("SELECT COUNT(*) FROM positions WHERE status='EMERGENCY_UNPROTECTED'").fetchone()[0]
+        if unprot > 0:
+            items.insert(0, {
+                "key": "emergency_pos",
+                "name": "🚨 UNPROTECTED POSITIONS",
+                "status": "bad",
+                "detail": f"{unprot} position(s) OPEN without SL!",
+                "hint": "trade_engine reconcile dekhun ba manually SL set korun!",
+                "fix": None
+            })
+
     con.close()
 
-    errs = tail_issues("collector.log") + tail_issues("scanner.log")
+    errs = tail_issues("collector.log") + tail_issues("scanner.log") + tail_issues("trader.log")
     return {"items": items, "errors": errs, "jobs": JOBS, "now": int(now * 1000)}
 
 
 # ------------------------------------------------------------------ safe fix
 @app.post("/api/fix/{action}")
-def fix(action: str):
+def fix(action: str, request: Request):
+    check_auth(request)
     if action not in ("scan", "rank", "backfill"):
         raise HTTPException(400, "unknown action")
     if JOBS.get(action, {}).get("running"):
