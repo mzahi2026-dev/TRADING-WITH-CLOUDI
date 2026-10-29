@@ -123,6 +123,26 @@ class Storage:
             (symbol, interval),
         )
 
+    def find_candle_gaps(self, symbol, interval, limit=300):
+        """Returns list of (gap_start, gap_end) where intermediate candles are missing."""
+        ms = config.INTERVAL_MS.get(interval)
+        if not ms:
+            return []
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT open_time FROM klines WHERE symbol=? AND interval=? ORDER BY open_time ASC LIMIT ?",
+                (symbol, interval, limit),
+            ).fetchall()
+        if len(rows) < 2:
+            return []
+        gaps = []
+        for i in range(1, len(rows)):
+            prev_t = rows[i - 1][0]
+            curr_t = rows[i][0]
+            if curr_t - prev_t > ms:
+                gaps.append((prev_t + ms, curr_t - ms))
+        return gaps
+
     def save_universe(self, items):
         now = int(time.time() * 1000)
         with self.lock:

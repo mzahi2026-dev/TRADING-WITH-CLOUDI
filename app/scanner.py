@@ -220,6 +220,15 @@ def run_scan(wait=True):
                     or len(b) < 30 or int(a["open_time"].iloc[-1]) != exp_open):
                 skipped += 1
                 continue
+            # Detect missing historical candle gaps
+            if len(a) > 1 and (a["open_time"].diff().iloc[1:] > DAY_MS).any():
+                log.warning(f"{sym}: 1d candle gap detected, skipping scan until backfilled")
+                skipped += 1
+                continue
+            if len(b) > 1 and (b["open_time"].diff().iloc[1:] > 4 * HOUR_MS).any():
+                log.warning(f"{sym}: 4h candle gap detected, skipping scan until backfilled")
+                skipped += 1
+                continue
             atr_v = calc_atr(a)
             if not atr_v > 0:
                 skipped += 1

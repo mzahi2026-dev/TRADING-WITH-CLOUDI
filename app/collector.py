@@ -21,6 +21,30 @@ def parse_rest(symbol, interval, r):
     )
 
 
+def fill_gaps(client, storage, symbol, interval, max_gaps=3):
+    gaps = storage.find_candle_gaps(symbol, interval)
+    if not gaps:
+        return 0
+    filled = 0
+    ms = config.INTERVAL_MS[interval]
+    now_ms = int(time.time() * 1000)
+    for gap_start, gap_end in gaps[:max_gaps]:
+        try:
+            params = {"symbol": symbol, "interval": interval,
+                      "startTime": gap_start, "endTime": gap_end + ms, "limit": 1000}
+            data = client.get("/fapi/v1/klines", params)
+            time.sleep(config.REQUEST_SLEEP)
+            if data:
+                rows = [parse_rest(symbol, interval, r) for r in data if int(r[6]) < now_ms]
+                storage.upsert_many(rows)
+                filled += len(rows)
+        except Exception as e:
+            log.warning(f"fill_gaps error {symbol} {interval}: {e}")
+    if filled > 0:
+        log.info(f"Recovered {filled} missing historical candles for {symbol} ({interval})")
+    return filled
+
+
 def backfill_symbol(client, storage, symbol):
     now_ms = int(time.time() * 1000)
     for interval in config.INTERVALS:
@@ -32,6 +56,7 @@ def backfill_symbol(client, storage, symbol):
             limit = config.HISTORY_LIMIT
         else:
             if now_ms < last + 2 * ms:
+                fill_gaps(client, storage, symbol, interval)
                 continue  # notun closed candle nai
             start = last + 1
             limit = min(config.HISTORY_LIMIT, (now_ms - last) // ms + 1)
@@ -53,6 +78,9 @@ def backfill_symbol(client, storage, symbol):
                 break
             start = int(data[-1][0]) + 1
             limit = config.HISTORY_LIMIT
+
+        # Check and recover intermediate missing candles
+        fill_gaps(client, storage, symbol, interval)
 
 
 def backfill_symbols(client, storage, symbols, quiet=False):

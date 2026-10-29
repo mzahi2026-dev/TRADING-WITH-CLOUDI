@@ -130,14 +130,40 @@ class Engine:
             if age > tc.RANK_MAX_AGE_MIN:
                 log.warning(f"Ranking purono ({age:.0f} min, {rh}). Cycle skip.")
                 return
+            # Risk Limit: Daily drawdown / loss circuit breaker
+            day_cutoff = int(time.time() * 1000) - 24 * 3600 * 1000
+            daily_loss = con.execute(
+                "SELECT COALESCE(SUM(pnl), 0) FROM positions WHERE status='CLOSED' AND closed IS NOT NULL AND entry_ms>=?",
+                (day_cutoff,)).fetchone()[0]
+            max_daily_loss = getattr(tc, "MAX_DAILY_LOSS_USDT", 150.0)
+            if daily_loss <= -max_daily_loss:
+                log.error(f"RISK LIMIT HIT: 24h net PnL is {daily_loss:.2f} USDT (limit: -{max_daily_loss} USDT). Trading cycle suspended!")
+                return
+
+            # Risk Limit: Available balance check
+            if not self.dry and self.dc:
+                try:
+                    av_bal, _ = self.dc.balance()
+                    min_bal = getattr(tc, "MIN_AVAILABLE_BALANCE", 50.0)
+                    if av_bal < min_bal:
+                        log.warning(f"RISK LIMIT: Available balance {av_bal:.2f} USDT < min required {min_bal:.2f} USDT. Skipping cycle.")
+                        return
+                except Exception as e:
+                    log.warning(f"Failed to check balance risk limit: {e}")
+
             syms = rk["symbol"].tolist()
             ph = ",".join("?" * len(syms))
+            n = 0
             for _ in range(12):
                 n = con.execute(f"SELECT COUNT(DISTINCT symbol) FROM klines WHERE interval='15m' "
                                 f"AND open_time=? AND symbol IN ({ph})", [exp_open] + syms).fetchone()[0]
                 if n >= 0.8 * len(syms):
                     break
                 time.sleep(10)
+
+            if n < 0.6 * len(syms):
+                log.warning(f"Data not ready: only {n}/{len(syms)} symbols have 15m candle. Skipping trading cycle.")
+                return
 
             open_syms = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')")}
             cutoff = int(time.time() * 1000) - tc.COOLDOWN_HOURS * 3600 * 1000
@@ -154,7 +180,11 @@ class Engine:
                     "WHERE symbol=? AND interval='15m' AND open_time<=? "
                     "ORDER BY open_time DESC LIMIT 120", con, params=(sym, exp_open))
                 df = df.sort_values("open_time").reset_index(drop=True)
-                if df.empty or int(df["open_time"].iloc[-1]) != exp_open:
+                if df.empty or int(df["open_time"].iloc[-1]) != exp_open or len(df) < 50:
+                    continue
+                # Missing historical candle gap detection
+                if len(df) > 1 and (df["open_time"].diff().iloc[1:] > MS15).any():
+                    log.warning(f"{sym}: 15m candle gap detected, skipping entry")
                     continue
                 checked += 1
                 ev = evaluate(df, side)
@@ -355,7 +385,25 @@ class Engine:
             tracked = {r[1] for r in rows}
             for s, a in amt.items():
                 if a != 0 and s not in tracked:
-                    log.warning(f"Untracked demo position: {s} amt={a}")
+                    log.warning(f"RECONCILE: Untracked position found on Binance: {s} amt={a}")
+                    has_sl = False
+                    try:
+                        open_ords = (self.dc.open_orders(s) or []) + (self.dc.algo_open_orders(s) or [])
+                        has_sl = any(o.get("type") in ("STOP_MARKET", "STOP") for o in open_ords)
+                    except Exception as e:
+                        log.warning(f"Could not inspect orders for {s}: {e}")
+
+                    side = "LONG" if a > 0 else "SHORT"
+                    pos_info = [p for p in pos if p["symbol"] == s]
+                    ent_px = float(pos_info[0].get("entryPrice") or 0.0) if pos_info else 0.0
+                    st = "OPEN" if has_sl else "EMERGENCY_UNPROTECTED"
+                    con.execute(
+                        "INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
+                        "VALUES (?,?,'UNTRACKED_RECOVERED',?,?,0,0,?,?,?)",
+                        (bdt(), s, side, ent_px, abs(a), st, int(time.time() * 1000))
+                    )
+                    con.commit()
+                    log.info(f"Reconciled and tracked {s} into positions DB as {st}")
             for row in rows:
                 pid, sym, side, entry, sl, tp, ems, status = row
                 cur_amt = abs(amt.get(sym, 0.0))

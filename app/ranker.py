@@ -125,6 +125,7 @@ def run_rank(wait=True):
     run_hour = datetime.fromtimestamp(cutoff / 1000, tz=BDT).strftime("%Y-%m-%d %H:00")
 
     if wait:
+        n = 0
         for _ in range(20):
             n = con.execute(
                 "SELECT COUNT(DISTINCT symbol) FROM klines WHERE interval='1h' AND open_time=?",
@@ -133,6 +134,25 @@ def run_rank(wait=True):
                 break
             log.info(f"Notun 1h candle er jonno wait ({n}/{len(symbols)})...")
             time.sleep(15)
+
+        if n < 0.7 * len(symbols):
+            log.error(f"Data not ready: only {n}/{len(symbols)} symbols have latest 1h candle. Skipping ranking.")
+            return
+
+        # Check extra data readiness (OI & LS metrics)
+        oi_cnt = con.execute(
+            "SELECT COUNT(DISTINCT symbol) FROM oi_hist WHERE period='1h' AND ts>=?",
+            (cutoff - 2 * HOUR_MS,)).fetchone()[0]
+        if oi_cnt < 0.6 * len(symbols):
+            log.warning(f"Extra data (OI/LS) not fully synced ({oi_cnt}/{len(symbols)}). Waiting up to 60s...")
+            for _ in range(6):
+                time.sleep(10)
+                oi_cnt = con.execute(
+                    "SELECT COUNT(DISTINCT symbol) FROM oi_hist WHERE period='1h' AND ts>=?",
+                    (cutoff - 2 * HOUR_MS,)).fetchone()[0]
+                if oi_cnt >= 0.7 * len(symbols):
+                    break
+            log.info(f"Extra data ready: {oi_cnt}/{len(symbols)} symbols")
 
     log.info(f"Hourly rank shuru | run_hour={run_hour} (BDT) | watchlist={len(symbols)} "
              f"(scan_date={scan_date})")
@@ -168,6 +188,11 @@ def run_rank(wait=True):
             d = gk.get(sym)
             if (d is None or len(d) < config.MIN_1H_CANDLES
                     or int(d["open_time"].iloc[-1]) != exp_open):
+                skipped += 1
+                continue
+            # Missing candle gap detection
+            if len(d) > 1 and (d["open_time"].diff().iloc[1:] > HOUR_MS).any():
+                log.warning(f"{sym}: 1h candle gap detected, skipping until backfilled")
                 skipped += 1
                 continue
             atr_v = calc_atr(d)
