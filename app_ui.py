@@ -497,7 +497,7 @@ def health():
 @app.post("/api/fix/{action}")
 def fix(action: str, request: Request):
     check_auth(request)
-    if action not in ("scan", "rank", "backfill"):
+    if action not in ("scan", "rank", "backfill", "extra"):
         raise HTTPException(400, "unknown action")
     if JOBS.get(action, {}).get("running"):
         return {"ok": False, "msg": "already running"}
@@ -511,6 +511,18 @@ def fix(action: str, request: Request):
             elif action == "rank":
                 from app.ranker import run_rank
                 run_rank(wait=False)
+            elif action == "extra":
+                from app.binance_client import BinanceClient
+                from app.storage import Storage
+                from app.extra import job_hourly, job_fast
+                c = BinanceClient()
+                s = Storage()
+                con = db()
+                syms = [r[0] for r in con.execute("SELECT symbol FROM universe")] if has_table(con, "universe") else []
+                con.close()
+                if syms:
+                    job_fast(c, s, syms, full=True)
+                    job_hourly(c, s, syms, full=False)
             else:
                 from app.binance_client import BinanceClient
                 from app.storage import Storage

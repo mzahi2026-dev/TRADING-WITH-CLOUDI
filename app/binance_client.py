@@ -12,10 +12,19 @@ class BinanceClient:
         self.used_weight = 0
 
     def get(self, path, params=None):
-        url = config.FAPI_BASE + path
+        is_futures_data = path.startswith("/futures/data/")
+        if is_futures_data:
+            url = "https://fapi.binance.com" + path
+        else:
+            url = config.FAPI_BASE + path
+
         for attempt in range(5):
             try:
-                r = self.session.get(url, params=params, timeout=config.REQUEST_TIMEOUT)
+                # If calling production fapi for futures/data, do not pass demo API key
+                headers = None
+                if is_futures_data and config.USE_DEMO:
+                    headers = {}
+                r = self.session.get(url, params=params, headers=headers, timeout=config.REQUEST_TIMEOUT)
             except requests.RequestException as e:
                 log.warning(f"Network error {path}: {e} (retry {attempt + 1})")
                 time.sleep(2 * (attempt + 1))
