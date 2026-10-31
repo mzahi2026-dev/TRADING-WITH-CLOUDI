@@ -1,11 +1,23 @@
 import hashlib
 import hmac
 import os
+import socket
 import time
 from decimal import Decimal
 from urllib.parse import urlencode
 
 import requests
+from urllib3.util import connection
+
+# Force IPv4 on Windows to prevent dual-stack IPv6 DNS/handshake hangs
+def _force_ipv4(address, *args, **kwargs):
+    host, port = address
+    addrinfo = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    af, socktype, proto, canonname, sa = addrinfo[0]
+    sock = socket.socket(af, socktype, proto)
+    sock.connect(sa)
+    return sock
+connection.create_connection = _force_ipv4
 
 from . import config  # noqa: F401  (.env load hoy)
 from . import trade_config as tc
