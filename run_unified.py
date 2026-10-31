@@ -39,13 +39,23 @@ def acquire_instance_lock():
     if PID_FILE.exists():
         try:
             old_pid = int(PID_FILE.read_text().strip())
-            # Check if old pid is alive on Windows
-            import ctypes
-            kernel32 = ctypes.windll.kernel32
-            SYNCHRONIZE = 0x00100000
-            process = kernel32.OpenProcess(SYNCHRONIZE, False, old_pid)
-            if process != 0:
-                kernel32.CloseHandle(process)
+            alive = False
+            if sys.platform == "win32":
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                SYNCHRONIZE = 0x00100000
+                process = kernel32.OpenProcess(SYNCHRONIZE, False, old_pid)
+                if process != 0:
+                    kernel32.CloseHandle(process)
+                    alive = True
+            else:
+                try:
+                    os.kill(old_pid, 0)
+                    alive = True
+                except (OSError, ProcessLookupError):
+                    alive = False
+
+            if alive:
                 print(f"\n[DUPLICATE BLOCKED] Another instance is already running (PID: {old_pid})!")
                 print("Only one engine instance is allowed to prevent duplicate orders & conflicts.")
                 send_alert(f"⚠️ *Duplicate Instance Blocked*\nAn attempt was made to launch a second instance while PID `{old_pid}` is active.")
@@ -231,8 +241,10 @@ def main():
     except Exception:
         pass
 
+    port = int(os.getenv("PORT", 8000))
+    host = "0.0.0.0"
     try:
-        uvicorn.run(app_ui.app, host="127.0.0.1", port=8000, log_level="warning")
+        uvicorn.run(app_ui.app, host=host, port=port, log_level="warning")
     finally:
         release_instance_lock()
         send_alert("🛑 *Trading System Stopped*\nAll background services have been stopped cleanly.")
