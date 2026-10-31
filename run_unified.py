@@ -104,10 +104,10 @@ def run_scanner_worker():
 
 
 def run_trader_worker():
-    """Background trader scheduler with SAFE DRY MODE and auto-recovery."""
-    # Enforce SAFE DRY MODE
-    dry_mode = True
-    tlog.info("Trader Engine starting in SAFE DRY RUN MODE (No actual money risked)")
+    """Background trader scheduler with auto-recovery."""
+    dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
+    mode_str = "SAFE DRY RUN MODE (Paper)" if dry_mode else "BINANCE DEMO FUTURES (Live Demo Orders)"
+    tlog.info(f"Trader Engine starting in {mode_str}")
 
     while True:
         try:
