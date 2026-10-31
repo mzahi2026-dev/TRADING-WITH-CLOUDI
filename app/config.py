@@ -6,9 +6,18 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # ---- Binance USDS-M Futures ----
-FAPI_BASE = "https://fapi.binance.com"
-WS_BASE = "wss://fstream.binance.com"
-API_KEY = os.getenv("BINANCE_API_KEY", "") or os.getenv("DEMO_API_KEY", "")  # authenticate public requests to prevent IP rate-limiting
+USE_DEMO = os.getenv("USE_DEMO", "true").lower() in ("true", "1", "yes")
+
+# In DEMO mode (default for demo trading), use demo endpoints to prevent shared cloud IP 418 rate-limits
+FAPI_BASE = os.getenv(
+    "BINANCE_FAPI_BASE",
+    "https://demo-fapi.binance.com" if USE_DEMO else "https://fapi.binance.com",
+)
+WS_BASE = os.getenv(
+    "BINANCE_WS_BASE",
+    "wss://demo-fstream.binance.com" if USE_DEMO else "wss://fstream.binance.com",
+)
+API_KEY = os.getenv("BINANCE_API_KEY", "") or os.getenv("DEMO_API_KEY", "")  # authenticate requests
 
 # ---- Timeframes ----
 INTERVALS = ["15m", "1h", "4h", "1d"]

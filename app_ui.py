@@ -349,7 +349,10 @@ def debug_status():
     b_test = ""
     try:
         import requests
-        r = requests.get(config.FAPI_BASE + "/fapi/v1/time", timeout=5)
+        hdrs = {}
+        if config.API_KEY:
+            hdrs["X-MBX-APIKEY"] = config.API_KEY
+        r = requests.get(config.FAPI_BASE + "/fapi/v1/time", headers=hdrs, timeout=5)
         b_test = f"HTTP {r.status_code}: {r.text[:50]}"
     except Exception as be:
         b_test = f"Binance time error: {be}"
