@@ -106,7 +106,7 @@ async def ws_worker(name, symbols, queue, client, storage):
     while True:
         try:
             async with websockets.connect(
-                url, ping_interval=20, ping_timeout=20, max_queue=None, close_timeout=10
+                url, ping_interval=20, ping_timeout=20, max_queue=None, close_timeout=10, open_timeout=30
             ) as ws:
                 log.info(f"WS-{name} connected ({len(symbols)} symbols)")
                 delay = 3
@@ -119,7 +119,8 @@ async def ws_worker(name, symbols, queue, client, storage):
                 first = False
 
                 while True:
-                    raw = await asyncio.wait_for(ws.recv(), timeout=60)
+                    # Binance WebSocket send messages on price updates; 180s timeout prevents unnecessary reconnects
+                    raw = await asyncio.wait_for(ws.recv(), timeout=180)
                     msg = json.loads(raw)
                     d = msg.get("data", {})
                     if d.get("e") != "kline":
@@ -136,9 +137,14 @@ async def ws_worker(name, symbols, queue, client, storage):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            log.warning(f"WS-{name} dropped: {e!r}. Reconnect in {delay}s")
+            # Demote routine timeout reconnection messages to debug to prevent visual clutter
+            err_str = str(e)
+            if "TimeoutError" in err_str or "timed out" in err_str:
+                log.info(f"WS-{name} ping timeout, reconnecting in {delay}s...")
+            else:
+                log.warning(f"WS-{name} dropped: {e!r}. Reconnect in {delay}s")
             await asyncio.sleep(delay)
-            delay = min(30, delay * 1.5)
+            delay = min(20, delay * 1.5)
 
 
 async def writer(queue, storage):
