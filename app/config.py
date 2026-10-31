@@ -8,7 +8,7 @@ load_dotenv(BASE_DIR / ".env")
 # ---- Binance USDS-M Futures ----
 FAPI_BASE = "https://fapi.binance.com"
 WS_BASE = "wss://fstream.binance.com"
-API_KEY = os.getenv("BINANCE_API_KEY", "")  # optional
+API_KEY = os.getenv("BINANCE_API_KEY", "") or os.getenv("DEMO_API_KEY", "")  # authenticate public requests to prevent IP rate-limiting
 
 # ---- Timeframes ----
 INTERVALS = ["15m", "1h", "4h", "1d"]
