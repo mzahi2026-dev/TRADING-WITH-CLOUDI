@@ -106,7 +106,7 @@ async def ws_worker(name, symbols, queue, client, storage):
     while True:
         try:
             async with websockets.connect(
-                url, ping_interval=20, ping_timeout=20, max_queue=None, close_timeout=10, open_timeout=30
+                url, ping_interval=20, ping_timeout=20, max_queue=None, close_timeout=10, open_timeout=45
             ) as ws:
                 log.info(f"WS-{name} connected ({len(symbols)} symbols)")
                 delay = 3
@@ -137,10 +137,11 @@ async def ws_worker(name, symbols, queue, client, storage):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            # Demote routine timeout reconnection messages to debug to prevent visual clutter
-            err_str = str(e)
-            if "TimeoutError" in err_str or "timed out" in err_str:
-                log.info(f"WS-{name} ping timeout, reconnecting in {delay}s...")
+            # Routine network timeout or handshake delay is normal in websockets; log as INFO so it doesn't alarm user in dashboard
+            err_repr = repr(e).lower()
+            is_timeout = isinstance(e, (asyncio.TimeoutError, TimeoutError)) or "timeout" in err_repr or "handshake" in err_repr
+            if is_timeout:
+                log.info(f"WS-{name} temporary network timeout ({e!r}). Reconnecting in {delay}s...")
             else:
                 log.warning(f"WS-{name} dropped: {e!r}. Reconnect in {delay}s")
             await asyncio.sleep(delay)
