@@ -133,6 +133,94 @@ def candles(symbol: str, interval: str = "15m", limit: int = 600):
     }
 
 
+# ------------------------------------------------------------------ analysis
+@app.get("/api/analysis")
+def get_analysis(symbol: str, interval: str = "15m"):
+    from app.strategies import prep, evaluate
+    from app import trade_config as tc
+    symbol = symbol.upper()
+    con = db()
+    df = pd.read_sql_query(
+        "SELECT open_time, open, high, low, close, volume, taker_buy_base FROM klines "
+        "WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT 150",
+        con, params=(symbol, interval)
+    )
+    # Check current bias from ranking
+    rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()
+    side = "LONG"
+    rank_score = 0
+    if rh and rh[0]:
+        rk = con.execute("SELECT side, rank_score FROM ranking WHERE run_hour=? AND symbol=?", (rh[0], symbol)).fetchone()
+        if rk:
+            side = rk[0]
+            rank_score = rk[1]
+        else:
+            wl = con.execute("SELECT side, score FROM watchlist WHERE symbol=? ORDER BY scan_date DESC LIMIT 1", (symbol,)).fetchone()
+            if wl:
+                side = wl[0]
+                rank_score = wl[1]
+    con.close()
+
+    if df.empty or len(df) < 50:
+        return {"ok": False, "msg": "Not enough candle history for analysis"}
+
+    df = df.sort_values("open_time").reset_index(drop=True)
+    d = prep(df)
+    last = d.iloc[-1]
+    close = float(last["close"])
+    atr = float(last["atr"]) if not pd.isna(last["atr"]) else close * 0.01
+    ema20 = float(last["ema20"])
+    ema50 = float(last["ema50"])
+    rsi = float(last["rsi"]) if not pd.isna(last["rsi"]) else 50.0
+
+    # Auto detect strategy hits for both LONG and SHORT
+    ev_long = evaluate(df, "LONG")
+    ev_short = evaluate(df, "SHORT")
+
+    active_ev = ev_long if side == "LONG" else ev_short
+    setup_name = active_ev["hits"][0][0] if (active_ev and active_ev.get("hits")) else None
+    setup_reason = active_ev["hits"][0][1] if (active_ev and active_ev.get("hits")) else "Monitoring setup (Trend alignment & pullback)"
+
+    # If no hit on primary side, check alternative
+    if not setup_name:
+        if ev_short and ev_short.get("hits"):
+            side = "SHORT"
+            setup_name = ev_short["hits"][0][0]
+            setup_reason = ev_short["hits"][0][1]
+        elif ev_long and ev_long.get("hits"):
+            side = "LONG"
+            setup_name = ev_long["hits"][0][0]
+            setup_reason = ev_long["hits"][0][1]
+        else:
+            # Fallback to trend bias
+            setup_name = f"{side} Trend Follow"
+
+    k = 1 if side == "LONG" else -1
+    entry = close
+    sl = round(entry - k * tc.SL_ATR * atr, 6 if close < 1 else 4 if close < 100 else 2)
+    tp1 = round(entry + k * tc.TP_ATR * atr, 6 if close < 1 else 4 if close < 100 else 2)
+    tp2 = round(entry + k * (tc.TP_ATR * 1.5) * atr, 6 if close < 1 else 4 if close < 100 else 2)
+    risk_reward = f"1 : {(tc.TP_ATR / tc.SL_ATR):.1f}"
+
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "side": side,
+        "strategy": setup_name,
+        "reason": setup_reason,
+        "entry": entry,
+        "sl": sl,
+        "tp1": tp1,
+        "tp2": tp2,
+        "risk_reward": risk_reward,
+        "atr": round(atr, 4),
+        "ema20": round(ema20, 4),
+        "ema50": round(ema50, 4),
+        "rsi": round(rsi, 1),
+        "rank_score": rank_score
+    }
+
+
 # ------------------------------------------------------------------ watch / signals
 @app.get("/api/watch")
 def watch():
