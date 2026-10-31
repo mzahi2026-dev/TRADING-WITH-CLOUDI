@@ -90,7 +90,26 @@ def candles(symbol: str, interval: str = "15m", limit: int = 600):
         "WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?",
         con, params=(symbol, interval, limit + 300))
     lv = {}
-    if has_table(con, "watchlist"):
+    if not df.empty and len(df) >= 20:
+        # Calculate dynamic recent swing Support & Resistance relative to current timeframe
+        cur_c = float(df["close"].iloc[-1])
+        # Look at last 60 candles on current chart
+        sub = df.tail(60).reset_index(drop=True)
+        hi, lo = sub["high"].values, sub["low"].values
+        sw_highs, sw_lows = [], []
+        k = 2
+        for i in range(k, len(sub) - k):
+            if hi[i] == hi[i - k:i + k + 1].max():
+                sw_highs.append(float(hi[i]))
+            if lo[i] == lo[i - k:i + k + 1].min():
+                sw_lows.append(float(lo[i]))
+        
+        above = [h for h in sw_highs if h > cur_c]
+        below = [l for l in sw_lows if l < cur_c]
+        dyn_res = min(above) if above else float(sub["high"].max())
+        dyn_sup = max(below) if below else float(sub["low"].min())
+        lv = {"side": "DYNAMIC", "support": dyn_sup, "resistance": dyn_res}
+    elif has_table(con, "watchlist"):
         r = con.execute("SELECT side, support, resistance FROM watchlist "
                         "WHERE symbol=? ORDER BY scan_date DESC LIMIT 1", (symbol,)).fetchone()
         if r:
