@@ -96,13 +96,34 @@ def run_scanner_worker():
             sched.start()
             clog.info("Scanner & Ranker Scheduler started (06:02 & :12 BDT)")
 
-            # Check if watchlist is empty
-            con = Storage().conn
-            has_wl = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist'").fetchone()
-            count = con.execute("SELECT COUNT(*) FROM watchlist").fetchone()[0] if has_wl else 0
-            if count == 0:
-                clog.info("Watchlist empty. Running initial scan & rank...")
-                threading.Thread(target=run_scan, kwargs={"wait": False}, daemon=True).start()
+            # Auto-bootstrap on fresh start or empty database
+            def _initial_bootstrap():
+                for attempt in range(90):  # wait up to 15 minutes for collector to populate data
+                    try:
+                        c = Storage().conn
+                        has_u_tbl = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='universe'").fetchone()
+                        u_count = c.execute("SELECT COUNT(*) FROM universe").fetchone()[0] if has_u_tbl else 0
+                        has_k_tbl = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='klines'").fetchone()
+                        k_count = c.execute("SELECT COUNT(*) FROM klines WHERE interval='1d'").fetchone()[0] if has_k_tbl else 0
+                        has_wl_tbl = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist'").fetchone()
+                        wl_count = c.execute("SELECT COUNT(*) FROM watchlist").fetchone()[0] if has_wl_tbl else 0
+                        c.close()
+
+                        if wl_count > 0:
+                            break
+
+                        if u_count > 0 and k_count >= 20:
+                            clog.info(f"Bootstrap data ready ({u_count} symbols, {k_count} daily klines). Running scan & rank...")
+                            run_scan(wait=False)
+                            time.sleep(2)
+                            run_rank(wait=False)
+                            clog.info("Initial scan & rank bootstrap complete!")
+                            break
+                    except Exception as be:
+                        clog.warning(f"Bootstrap check retry: {be}")
+                    time.sleep(10)
+
+            threading.Thread(target=_initial_bootstrap, daemon=True, name="BootstrapThread").start()
 
             # Keep scheduler thread alive
             while sched.running:

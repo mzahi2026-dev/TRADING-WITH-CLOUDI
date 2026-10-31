@@ -331,8 +331,30 @@ def tail_issues(name, keep=6):
             lines = f.read().decode("utf-8", errors="ignore").splitlines()
     except Exception:
         return []
-    bad = [l for l in lines if "| ERROR |" in l or "| WARNING |" in l]
+    bad = [l for l in lines if "| ERROR |" in l or "| WARNING |" in l or "| CRITICAL |" in l]
     return [f"[{name}] {l}" for l in bad[-keep:]]
+
+
+@app.get("/api/debug_status")
+def debug_status():
+    p = config.LOG_DIR / "collector.log"
+    txt = ""
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                txt = f.read()[-3000:]
+        except Exception as e:
+            txt = f"read error: {e}"
+
+    b_test = ""
+    try:
+        import requests
+        r = requests.get(config.FAPI_BASE + "/fapi/v1/time", timeout=5)
+        b_test = f"HTTP {r.status_code}: {r.text[:50]}"
+    except Exception as be:
+        b_test = f"Binance time error: {be}"
+
+    return {"collector_log": txt, "binance_test": b_test}
 
 
 def pct_status(p):
@@ -489,11 +511,15 @@ def fix(action: str, request: Request):
             else:
                 from app.binance_client import BinanceClient
                 from app.storage import Storage
-                from app.collector import backfill_symbols
+                from app.collector import backfill_symbols, fetch_universe
+                c = BinanceClient()
+                s = Storage()
                 con = db()
-                syms = [r[0] for r in con.execute("SELECT symbol FROM universe")]
+                syms = [r[0] for r in con.execute("SELECT symbol FROM universe")] if has_table(con, "universe") else []
                 con.close()
-                backfill_symbols(BinanceClient(), Storage(), syms, True)
+                if not syms:
+                    syms = fetch_universe(c, s)
+                backfill_symbols(c, s, syms, True)
             JOBS[action] = {"running": False, "msg": "done", "finished": int(time.time() * 1000)}
         except Exception as e:
             JOBS[action] = {"running": False, "msg": f"error: {e}", "finished": int(time.time() * 1000)}
