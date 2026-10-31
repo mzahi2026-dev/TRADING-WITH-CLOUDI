@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Trading Chart</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0b0f14;--panel:#111821;--line:#1f2833;--tx:#d1d7e0;--mut:#7d8896;--g:#26a69a;--r:#ef5350;--y:#f0b90b;--b:#4aa3ff}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font:13px/1.35 Segoe UI,Arial,sans-serif;overflow:hidden}
+#app{display:grid;grid-template-columns:280px 5px 1fr 5px 360px;height:100vh}
+aside{background:var(--panel);overflow:auto;min-width:0;display:flex;flex-direction:column;scrollbar-width:thin;scrollbar-color:transparent transparent}
+aside:hover{scrollbar-color:#2c3647 transparent}
+.hdl{background:var(--line);cursor:col-resize;overflow:hidden}
+.hdl:hover,.hdl.drag{background:#3b6fb0}
+main{display:flex;flex-direction:column;min-width:0;min-height:0}
+#top{display:flex;gap:8px;align-items:center;padding:6px 8px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap}
+button{background:#1b2431;color:var(--tx);border:1px solid var(--line);border-radius:4px;padding:4px 9px;cursor:pointer;font-size:12px}
+button:hover{background:#243044}
+button.on{background:#2b3a52;border-color:#3b5378;color:#fff}
+input{background:#0b0f14;border:1px solid var(--line);color:var(--tx);border-radius:4px;padding:4px 7px;font-size:12px}
+#sym{width:140px;font-weight:600}
+#live{margin-left:auto;color:var(--mut);font-size:12px}
+#charts{flex:1;display:flex;flex-direction:column;min-height:0;position:relative}
+.pane{position:relative;min-height:0;border-top:1px solid var(--line)}
+#p1{flex:5}#p2{flex:1.3}#p3{flex:1.4}#p4{flex:1.7}
+#legend{position:absolute;left:10px;top:6px;z-index:5;pointer-events:none;font-size:12px;text-shadow:0 0 3px #000}
+#legend b{color:#fff}
+#msg{position:absolute;left:50%;top:40%;transform:translateX(-50%);z-index:6;color:var(--mut)}
+#dtools{position:absolute;left:6px;top:72px;z-index:8;display:grid;grid-template-columns:30px 30px;gap:3px;background:#111821ee;border:1px solid var(--line);border-radius:6px;padding:4px}
+#dtools button{width:30px;height:30px;padding:0;display:flex;align-items:center;justify-content:center}
+#dtools svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+#dtools input[type=color]{width:30px;height:30px;padding:2px;border-radius:4px;cursor:pointer}
+h4{margin:0;padding:8px 10px;font-size:12px;letter-spacing:.5px;color:var(--mut);text-transform:uppercase;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+.hi{padding:7px 10px;border-bottom:1px solid #161e29}
+.hi .n{display:flex;align-items:center;gap:7px;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;background:#555;flex:none}
+.ok .dot{background:var(--g)}.warn .dot{background:var(--y)}.bad .dot{background:var(--r)}.idle .dot{background:#555}
+.hi .d{color:var(--mut);font-size:12px;margin:2px 0 0 16px}
+.hi .h{color:#f3a;font-size:12px;margin:3px 0 0 16px}
+.hi button{margin:5px 0 0 16px}
+.err{font:11px/1.3 Consolas,monospace;color:#c9a;padding:6px 10px;border-bottom:1px solid #161e29;word-break:break-all}
+#sum{padding:8px 10px;font-weight:600}
+.tabs{display:flex;border-bottom:1px solid var(--line)}
+.tabs button{flex:1;border-radius:0;border:0;border-bottom:2px solid transparent;background:none;padding:9px}
+.tabs button.on{border-bottom-color:var(--b);color:#fff;background:none}
+.row{display:grid;grid-template-columns:28px 1fr 52px 48px;gap:4px;padding:5px 10px;cursor:pointer;border-bottom:1px solid #161e29;align-items:center}
+.row:hover{background:#17202c}.row.sel{background:#1d2a3b}
+.row .s{font-weight:600}.row .m{color:var(--mut);text-align:right;font-size:12px}
+.tag{font-size:11px;padding:1px 5px;border-radius:3px;text-align:center}
+.LONG{background:#12332f;color:var(--g)}.SHORT{background:#3a1a1a;color:var(--r)}
+.sec{padding:6px 10px;color:var(--mut);font-size:11px;background:#0e141c}
+.note{padding:14px;color:var(--mut)}
+table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;border-bottom:1px solid #161e29;text-align:left}
+
+/* Detailed terminal panes: compact rows, responsive horizontal scrolling */
+#right{overflow:hidden}#tab-watch,#tab-signal,#tab-pos{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+.terminal-table-wrap{width:100%;overflow-x:auto;scrollbar-width:thin}
+.terminal-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:fixed}
+.terminal-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 4px}
+.terminal-table td{padding:5px 4px;white-space:nowrap;color:#cdd8e8;border-bottom:1px solid #1b2937;overflow:hidden;text-overflow:ellipsis}
+.terminal-table th:nth-child(1), .terminal-table td:nth-child(1){width:24px;text-align:center}
+.terminal-table th:nth-child(2), .terminal-table td:nth-child(2){width:75px}
+.terminal-table th:nth-child(3), .terminal-table td:nth-child(3){width:45px;text-align:center}
+.terminal-table th:nth-child(4), .terminal-table td:nth-child(4){width:42px;text-align:right}
+.terminal-table th:nth-child(5), .terminal-table td:nth-child(5){width:38px;text-align:right}
+.terminal-table th:nth-child(6), .terminal-table td:nth-child(6){width:38px;text-align:right}
+.terminal-table th:nth-child(7), .terminal-table td:nth-child(7){width:38px;text-align:right}
+.terminal-table tbody tr[data-s]{cursor:pointer}.terminal-table tbody tr[data-s]:hover{background:#1d3042}.terminal-table tbody tr.sel{background:#20334a}
+.terminal-table .num{text-align:right}.terminal-table td.muted{color:#8195ac}.terminal-table .symname{font-weight:700;color:#f0f5fb}
+.terminal-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
+.terminal-table .detail-row{cursor:default}.details-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 12px}
+.details-grid .k{color:#8da2ba}.details-grid .v{color:#e4edf8;overflow-wrap:anywhere}
+.positive{color:#29c9a3!important}.negative{color:#f77a80!important}.dim{color:#8195ac!important}
+.signal-stack{padding:8px;display:flex;flex-direction:column;gap:9px}
+.sig-card{background:#131e2b;border:1px solid #26384c;border-radius:7px;padding:11px}
+.sig-head,.sig-meta,.sig-foot{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.sig-symbol{font-size:14px;font-weight:700;color:#f3f7fc}.sig-meta{margin-top:4px;font-size:11px;color:#94a8c0;flex-wrap:wrap}
+.sig-prices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-top:10px}
+.sig-price{min-width:0;border:1px solid #25364a;border-radius:4px;padding:6px;background:#101a27}
+.sig-price small{display:block;color:#8b9db4;font-size:10px;margin-bottom:4px}.sig-price strong{font-size:12px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.sig-foot{margin-top:9px;padding-top:9px;border-top:1px solid #27384c;font-size:11px;color:#9fb3ca}
+.sig-card details{border-top:1px solid #263649;margin-top:9px;padding-top:8px;font-size:11px;color:#b0c3d9}
+.sig-card summary{cursor:pointer;color:#71b6fa}.sig-reason{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:7px}
+.section-toolbar{padding:8px 10px;display:flex;justify-content:space-between;align-items:center;color:#9cb1c9;font-size:11px;background:#0e1723;border-bottom:1px solid #243143}
+.section-toolbar strong{color:#e7f0fb;font-size:12px}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="left">
+    <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
+    <div id="sum">...</div>
+    <div id="hitems"></div>
+    <h4>Errors / Warnings (log)</h4>
+    <div id="errs"></div>
+    <h4>Fix jobs</h4>
+    <div id="jobs" class="note">-</div>
+  </aside>
+  <div class="hdl" id="hl" title="Drag = size, Double-click = reset"></div>
+
+  <main>
+    <div id="top">
+      <button id="tl" title="Bam sidebar">&#9664;</button>
+      <input id="sym" list="ulist" spellcheck="false"><datalist id="ulist"></datalist>
+      <span id="tfs"></span>
+      <span>
+        <button class="on" data-i="ema">EMA</button>
+        <button class="on" data-i="vol">Volume</button>
+        <button class="on" data-i="rsi">RSI</button>
+        <button class="on" data-i="macd">MACD</button>
+      </span>
+      <span id="live">-</span>
+      <button id="tr" title="Dan sidebar">&#9654;</button>
+    </div>
+    <div id="charts">
+      <div id="legend"></div><div id="msg"></div>
+      <div id="dtools">
+        <button data-tool="cursor" class="on" title="Cursor (Esc)"><svg viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6z"/></svg></button>
+        <button data-tool="trend" title="Trend line"><svg viewBox="0 0 24 24"><path d="M4 19L20 5"/><circle cx="4" cy="19" r="2"/><circle cx="20" cy="5" r="2"/></svg></button>
+        <button data-tool="ray" title="Ray"><svg viewBox="0 0 24 24"><path d="M4 18L21 6"/><circle cx="4" cy="18" r="2"/><path d="M16 5h5v5"/></svg></button>
+        <button data-tool="hline" title="Horizontal line"><svg viewBox="0 0 24 24"><path d="M3 12h18"/><circle cx="12" cy="12" r="2"/></svg></button>
+        <button data-tool="vline" title="Vertical line"><svg viewBox="0 0 24 24"><path d="M12 3v18"/><circle cx="12" cy="12" r="2"/></svg></button>
+        <button data-tool="rect" title="Rectangle"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></button>
+        <button data-tool="fib" title="Fib retracement"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 10h16M4 14h16M4 19h16"/></svg></button>
+        <button data-tool="measure" title="Measure"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M15 5h4v4M9 19H5v-4"/></svg></button>
+        <button data-tool="text" title="Text"><svg viewBox="0 0 24 24"><path d="M5 6h14M12 6v13M9 19h6"/></svg></button>
+        <button data-tool="eraser" title="Eraser (drawing er upor click = delete)"><svg viewBox="0 0 24 24"><path d="M4 16l8-9 8 7-5 5H8zM10 19h10"/></svg></button>
+        <button id="dMagnet" title="Magnet (candle OHLC e snap)"><svg viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0012 0V4h-4v8a2 2 0 01-4 0V4z"/></svg></button>
+        <button id="dUndo" title="Undo"><svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 010 12h-3"/></svg></button>
+        <button id="dClear" title="Clear all (ei symbol er)"><svg viewBox="0 0 24 24"><path d="M5 7h14M9 7V4h6v3M7 7l1 13h8l1-13"/></svg></button>
+        <input type="color" id="dColor" value="#f0b90b" title="Color">
+      </div>
+      <div class="pane" id="p1"></div>
+      <div class="pane" id="p2"></div>
+      <div class="pane" id="p3"></div>
+      <div class="pane" id="p4"></div>
+    </div>
+  </main>
+
+  <div class="hdl" id="hr" title="Drag = size, Double-click = reset"></div>
+  <aside id="right">
+    <div class="tabs">
+      <button data-t="watch" class="on">Watch</button>
+      <button data-t="signal">Signal</button>
+      <button data-t="pos">Position</button>
+    </div>
+    <div id="tab-watch"></div>
+    <div id="tab-signal" style="display:none"></div>
+    <div id="tab-pos" style="display:none"></div>
+  </aside>
+</div>
+
+<script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SHIFT = 21600;
+let sym = localStorage.getItem('sym') || 'BTCUSDT';
+let tf = localStorage.getItem('tf') || '15m';
+const TFS = ['15m','1h','4h','1d'];
+const STEP = {'15m':900,'1h':3600,'4h':14400,'1d':86400};
+
+// ---------- sidebar size + hide
+const app = document.getElementById('app');
+let LWd = +localStorage.getItem('lw') || 300, RWd = +localStorage.getItem('rw') || 340;
+let hideL = localStorage.getItem('hl') === '1', hideR = localStorage.getItem('hr') === '1';
+function cols() {
+  app.style.gridTemplateColumns = `${hideL ? 0 : LWd}px ${hideL ? 0 : 5}px 1fr ${hideR ? 0 : 5}px ${hideR ? 0 : RWd}px`;
+}
+function dragHandle(el, side) {
+  el.addEventListener('pointerdown', e => {
+    el.setPointerCapture(e.pointerId); el.classList.add('drag'); document.body.style.userSelect = 'none';
+    const mv = ev => {
+      if (side === 'l') LWd = Math.max(200, Math.min(700, ev.clientX));
+      else RWd = Math.max(220, Math.min(760, window.innerWidth - ev.clientX));
+      cols();
+    };
+    const up = ev => {
+      try { el.releasePointerCapture(ev.pointerId); } catch (x) {}
+      el.removeEventListener('pointermove', mv); el.removeEventListener('pointerup', up);
+      el.classList.remove('drag'); document.body.style.userSelect = '';
+      localStorage.setItem(side === 'l' ? 'lw' : 'rw', side === 'l' ? LWd : RWd);
+    };
+    el.addEventListener('pointermove', mv); el.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', () => {
+    if (side === 'l') { LWd = 300; localStorage.setItem('lw', 300); } else { RWd = 340; localStorage.setItem('rw', 340); }
+    cols();
+  });
+}
+dragHandle(document.getElementById('hl'), 'l');
+dragHandle(document.getElementById('hr'), 'r');
+$('#tl').onclick = () => { hideL = !hideL; localStorage.setItem('hl', hideL ? '1' : '0'); cols(); };
+$('#tr').onclick = () => { hideR = !hideR; localStorage.setItem('hr', hideR ? '1' : '0'); cols(); };
+cols();
+
+// ---------- charts
+const LW = LightweightCharts;
+const base = {
+  autoSize: true,
+  layout: {background:{color:'#0b0f14'}, textColor:'#9aa5b4'},
+  grid: {vertLines:{color:'#151c26'}, horzLines:{color:'#151c26'}},
+  crosshair: {mode: LW.CrosshairMode.Normal},
+  rightPriceScale: {borderColor:'#252e3a', minimumWidth: 72},
+  timeScale: {borderColor:'#252e3a', timeVisible:true, secondsVisible:false, rightOffset:6}
+};
+const ids = ['p1','p2','p3','p4'];
+const charts = ids.map(id => LW.createChart(document.getElementById(id), JSON.parse(JSON.stringify(base))));
+
+const candleS = charts[0].addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borderVisible:false,wickUpColor:'#26a69a',wickDownColor:'#ef5350'});
+const ema20S = charts[0].addLineSeries({color:'#f0b90b',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const ema50S = charts[0].addLineSeries({color:'#4aa3ff',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const volS = charts[1].addHistogramSeries({priceFormat:{type:'volume'},priceLineVisible:false});
+const vmaS = charts[1].addLineSeries({color:'#f0b90b',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const rsiS = charts[2].addLineSeries({color:'#b28dff',lineWidth:1,priceLineVisible:false});
+rsiS.createPriceLine({price:70,color:'#666',lineStyle:2,lineWidth:1,axisLabelVisible:true,title:''});
+rsiS.createPriceLine({price:30,color:'#666',lineStyle:2,lineWidth:1,axisLabelVisible:true,title:''});
+const macdH = charts[3].addHistogramSeries({priceLineVisible:false,lastValueVisible:false});
+const macdL = charts[3].addLineSeries({color:'#4aa3ff',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const sigL = charts[3].addLineSeries({color:'#f0b90b',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
+const mains = [candleS, volS, rsiS, macdL];
+// Chart axis follows requested display precision without changing candle data.
+function setPriceDisplay(referencePrice) {
+  const digits = priceDigits(referencePrice);
+  const priceFormat = {type:'custom', minMove: digits === 5 ? 0.00000001 : 0.00000001,
+    formatter: value => Number(value).toFixed(digits)};
+  [candleS, ema20S, ema50S].forEach(series => series.applyOptions({priceFormat}));
+}
+function restorePriceAutoScale() {
+  // Reset manual price-axis zoom inherited from the preceding symbol.
+  charts[0].priceScale('right').applyOptions({autoScale:true});
+}
+
+
+let syncing = false;
+charts.forEach((c,i) => c.timeScale().subscribeVisibleLogicalRangeChange(r => {
+  if (syncing || !r) return;
+  syncing = true;
+  charts.forEach((o,j) => { if (j !== i) o.timeScale().setVisibleLogicalRange(r); });
+  syncing = false;
+}));
+
+const M = {c:new Map(), v:new Map(), vm:new Map(), r:new Map(), m:new Map(), s:new Map(), h:new Map()};
+let lastT = null, inX = false, times = [];
+charts.forEach((c,i) => c.subscribeCrosshairMove(p => {
+  if (inX) return;
+  inX = true;
+  try {
+    charts.forEach((o,j) => {
+      if (j === i) return;
+      try { if (p.time) o.setCrosshairPosition(0, p.time, mains[j]); else o.clearCrosshairPosition(); } catch(e) {}
+    });
+  } finally { inX = false; }
+  legend(p.time || lastT);
+}));
+
+const priceDigits = p => Math.abs(Number(p)) < 0.99 ? 5 : 2;
+const priceText = p => (p == null || !Number.isFinite(Number(p))) ? '-' : Number(p).toFixed(priceDigits(p));
+const f = (x, d=2) => (x === undefined || x === null) ? '-' : Number(x).toFixed(d);
+function legend(t) {
+  const c = M.c.get(t);
+  if (!c) { $('#legend').innerHTML = ''; return; }
+  const up = c.close >= c.open, col = up ? '#26a69a' : '#ef5350';
+  const pr = priceDigits(c.close);
+  const chg = ((c.close / c.open - 1) * 100).toFixed(2);
+  $('#legend').innerHTML =
+    `<b>${sym}</b> &middot; ${tf} &nbsp;<span style="color:${col}">O ${f(c.open,pr)} H ${f(c.high,pr)} L ${f(c.low,pr)} C ${f(c.close,pr)} (${chg}%)</span><br>` +
+    `<span style="color:#f0b90b">EMA20 ${f(M.e20 && M.e20.get(t),pr)}</span> <span style="color:#4aa3ff">EMA50 ${f(M.e50 && M.e50.get(t),pr)}</span><br>` +
+    `<span style="color:#9aa5b4">Vol ${f(M.v.get(t),0)} &nbsp; MA20 ${f(M.vm.get(t),0)}</span> &nbsp; <span style="color:#b28dff">RSI ${f(M.r.get(t),1)}</span> &nbsp; ` +
+    `<span style="color:#4aa3ff">MACD ${f(M.m.get(t),4)}</span> <span style="color:#f0b90b">Sig ${f(M.s.get(t),4)}</span> <span>Hist ${f(M.h.get(t),4)}</span>`;
+}
+
+// ---------- data load
+let lines = [];
+let candleLoadId = 0;
+let loadedCandleKey = null;
+const toMap = a => new Map(a.map(x => [x.time, x.value]));
+async function load(fit) {
+  const loadId = ++candleLoadId, requestedSymbol = sym, requestedTf = tf;
+  let d;
+  try {
+    const res = await fetch(`/api/candles?symbol=${encodeURIComponent(requestedSymbol)}&interval=${encodeURIComponent(requestedTf)}&limit=600`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    d = await res.json();
+  } catch (e) {
+    if (loadId === candleLoadId) $('#msg').textContent = 'Candle load failed: ' + e.message;
+    return;
+  }
+  // A slower request for the previous coin must never overwrite the new coin's candles.
+  if (loadId !== candleLoadId || requestedSymbol !== sym || requestedTf !== tf) return;
+  if (!d.candles || !d.candles.length) { $('#msg').textContent = sym + ' ' + tf + ': DB te data nai'; return; }
+  $('#msg').textContent = '';
+  setPriceDisplay(d.candles[d.candles.length - 1].close);
+  candleS.setData(d.candles); ema20S.setData(d.ema20 || []); ema50S.setData(d.ema50 || []);
+  loadedCandleKey = requestedSymbol + ':' + requestedTf;
+  volS.setData(d.volume); vmaS.setData(d.vma); rsiS.setData(d.rsi);
+  macdH.setData(d.hist); macdL.setData(d.macd); sigL.setData(d.signal);
+  M.c = new Map(d.candles.map(x => [x.time, x]));
+  M.v = new Map(d.volume.map(x => [x.time, x.value]));
+  M.vm = toMap(d.vma); M.r = toMap(d.rsi); M.m = toMap(d.macd); M.s = toMap(d.signal);
+  M.h = toMap(d.hist); M.e20 = toMap(d.ema20); M.e50 = toMap(d.ema50);
+  times = d.candles.map(x => x.time);
+  lastT = times[times.length - 1];
+  lines.forEach(l => { try { candleS.removePriceLine(l); } catch(e) {} });
+  lines = [];
+  const lv = d.levels || {};
+  if (lv.support) lines.push(candleS.createPriceLine({price:lv.support,color:'#26a69a',lineStyle:2,lineWidth:1,axisLabelVisible:true,title:'Support'}));
+  if (lv.resistance) lines.push(candleS.createPriceLine({price:lv.resistance,color:'#ef5350',lineStyle:2,lineWidth:1,axisLabelVisible:true,title:'Resist'}));
+  if (fit) {
+    restorePriceAutoScale();
+    const n = d.candles.length;
+    charts[0].timeScale().setVisibleLogicalRange({from:Math.max(0,n-130), to:n+6});
+  }
+  legend(lastT); ver++;
+}
+
+// ---------- live ws
+let ws = null, wsOpen = false;
+function connectWS() {
+  if (ws) { ws.onclose = null; try { ws.close(); } catch(e) {} }
+  wsOpen = false; setLive();
+  const s = sym, t = tf;
+  try { ws = new WebSocket(`wss://fstream.binance.com/ws/${s.toLowerCase()}@kline_${t}`); } catch(e) { return; }
+  ws.onopen = () => { wsOpen = true; setLive(); };
+  ws.onmessage = ev => {
+    if (s !== sym || t !== tf || loadedCandleKey !== s + ':' + t) return;
+    const k = JSON.parse(ev.data).k; if (!k) return;
+    const time = Math.floor(k.t / 1000) + SHIFT;
+    const c = {time, open:+k.o, high:+k.h, low:+k.l, close:+k.c};
+    candleS.update(c);
+    volS.update({time, value:+k.v, color: c.close >= c.open ? '#26a69a88' : '#ef535088'});
+    M.c.set(time, c); M.v.set(time, +k.v); lastT = time;
+    if (!times.length || time > times[times.length - 1]) times.push(time);
+    if (k.x) setTimeout(() => load(false), 2500);
+  };
+  ws.onclose = () => { wsOpen = false; setLive(); setTimeout(() => { if (s === sym && t === tf) connectWS(); }, 6000); };
+  ws.onerror = () => { try { ws.close(); } catch(e) {} };
+}
+function setLive() {
+  $('#live').innerHTML = wsOpen ? '<span style="color:#26a69a">&#9679; LIVE</span>' : '<span style="color:#f0b90b">&#9679; DB (30s refresh)</span>';
+}
+setInterval(() => { if (!wsOpen) load(false); }, 30000);
+
+// =====================================================================
+// DRAWING TOOLS (canvas overlay on main pane)
+// =====================================================================
+const cv = document.createElement('canvas');
+cv.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;z-index:3;pointer-events:none';
+document.getElementById('p1').appendChild(cv);
+const cx = cv.getContext('2d');
+let drawings = [], pending = null, tool = 'cursor', hoverId = null, mouse = null;
+let ver = 0, magnet = localStorage.getItem('magnet') === '1', curColor = localStorage.getItem('dcolor') || '#f0b90b', measureObj = null;
+const TWO = ['trend','ray','rect','fib','measure'];
+const dkey = () => 'dr:' + sym;
+function loadDr() {
+  try { drawings = JSON.parse(localStorage.getItem(dkey()) || '[]'); } catch (e) { drawings = []; }
+  pending = null; measureObj = null; hoverId = null; ver++;
+}
+function saveDr() { try { localStorage.setItem(dkey(), JSON.stringify(drawings)); } catch (e) {} ver++; }
+
+function tToL(t) {
+  const n = times.length; if (!n) return 0;
+  const st = STEP[tf] || 900;
+  if (t >= times[n - 1]) return n - 1 + (t - times[n - 1]) / st;
+  if (t <= times[0]) return (t - times[0]) / st;
+  let lo = 0, hi = n - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (times[m] <= t) lo = m; else hi = m; }
+  return lo + (t - times[lo]) / (times[lo + 1] - times[lo]);
+}
+function lToT(l) {
+  const n = times.length; if (!n) return 0;
+  const st = STEP[tf] || 900;
+  if (l >= n - 1) return times[n - 1] + (l - (n - 1)) * st;
+  if (l <= 0) return times[0] + l * st;
+  const i = Math.floor(l);
+  return times[i] + (l - i) * (times[i + 1] - times[i]);
+}
+function px(p) {
+  const x = charts[0].timeScale().logicalToCoordinate(tToL(p.t));
+  const y = candleS.priceToCoordinate(p.p);
+  return (x == null || y == null) ? null : {x, y};
+}
+const fmtP = p => priceText(p);
+function rgba(hex, a) {
+  const h = hex.replace('#', ''); const n = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+function evPoint(e) {
+  const r = cv.getBoundingClientRect(); const x = e.clientX - r.left, y = e.clientY - r.top;
+  const l = charts[0].timeScale().coordinateToLogical(x); const price = candleS.coordinateToPrice(y);
+  if (l == null || price == null) return null;
+  let t = lToT(l), p = price;
+  if (magnet && times.length) {
+    const i = Math.round(l);
+    if (i >= 0 && i < times.length) {
+      t = times[i];
+      const c = M.c.get(times[i]);
+      if (c) {
+        let best = null, bd = 1e9;
+        [c.open, c.high, c.low, c.close].forEach(v => {
+          const yy = candleS.priceToCoordinate(v);
+          if (yy != null) { const dd = Math.abs(yy - y); if (dd < bd) { bd = dd; best = v; } }
+        });
+        if (best != null && bd < 20) p = best;
+      }
+    }
+  }
+  return {t, p, x, y};
+}
+function ln(p, q) { cx.beginPath(); cx.moveTo(p.x, p.y); cx.lineTo(q.x, q.y); cx.stroke(); }
+function dot(p) { cx.beginPath(); cx.arc(p.x, p.y, 3, 0, 6.283); cx.fill(); }
+function rayEnd(A, B) { const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1; return {x: A.x + dx / L * 10000, y: A.y + dy / L * 10000}; }
+function tag(text, x, y, bg, fg) {
+  cx.font = '11px Segoe UI, Arial';
+  const w = cx.measureText(text).width + 10;
+  cx.fillStyle = bg; cx.fillRect(x, y - 9, w, 18);
+  cx.fillStyle = fg || '#fff'; cx.textBaseline = 'middle'; cx.fillText(text, x + 5, y);
+  return w;
+}
+const FIB = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+function drawObj(o, plotW, H, hl) {
+  const A = px(o.a); if (!A) return;
+  const B = o.b ? px(o.b) : null;
+  cx.lineWidth = hl ? 3 : 1.6; cx.strokeStyle = o.color; cx.fillStyle = o.color; cx.setLineDash([]);
+  switch (o.type) {
+    case 'trend': if (!B) return; ln(A, B); dot(A); dot(B); break;
+    case 'ray': if (!B) return; ln(A, rayEnd(A, B)); dot(A); dot(B); break;
+    case 'hline': ln({x:0, y:A.y}, {x:plotW, y:A.y}); break;
+    case 'vline': ln({x:A.x, y:0}, {x:A.x, y:H}); break;
+    case 'rect': {
+      if (!B) return;
+      cx.fillStyle = rgba(o.color, 0.12); cx.fillRect(Math.min(A.x, B.x), Math.min(A.y, B.y), Math.abs(B.x - A.x), Math.abs(B.y - A.y));
+      cx.strokeRect(Math.min(A.x, B.x), Math.min(A.y, B.y), Math.abs(B.x - A.x), Math.abs(B.y - A.y));
+      break;
+    }
+    case 'fib': {
+      if (!B) return;
+      const x1 = Math.min(A.x, B.x), x2 = Math.max(Math.max(A.x, B.x), x1 + 90);
+      const ys = FIB.map(L => candleS.priceToCoordinate(o.b.p + (o.a.p - o.b.p) * L));
+      for (let i = 0; i < FIB.length - 1; i++) {
+        if (ys[i] == null || ys[i + 1] == null) continue;
+        cx.fillStyle = rgba(o.color, i % 2 ? 0.05 : 0.09);
+        cx.fillRect(x1, Math.min(ys[i], ys[i + 1]), x2 - x1, Math.abs(ys[i + 1] - ys[i]));
+      }
+      cx.font = '11px Segoe UI, Arial'; cx.textBaseline = 'bottom';
+      FIB.forEach((L, i) => {
+        if (ys[i] == null) return;
+        cx.strokeStyle = o.color; cx.lineWidth = hl ? 2.4 : 1; cx.setLineDash([]);
+        ln({x:x1, y:ys[i]}, {x:x2, y:ys[i]});
+        cx.fillStyle = o.color; cx.fillText(`${L} (${fmtP(o.b.p + (o.a.p - o.b.p) * L)})`, x1 + 4, ys[i] - 2);
+      });
+      cx.strokeStyle = o.color; cx.lineWidth = 1; cx.setLineDash([4, 4]); ln(A, B); cx.setLineDash([]); dot(A); dot(B);
+      break;
+    }
+    case 'measure': {
+      if (!B) return;
+      const dp = o.b.p - o.a.p, pct = dp / o.a.p * 100, bars = Math.round(tToL(o.b.t) - tToL(o.a.t));
+      const col = dp >= 0 ? '#26a69a' : '#ef5350';
+      cx.fillStyle = rgba(col, 0.14); cx.strokeStyle = col; cx.lineWidth = 1.2; cx.setLineDash([5, 4]);
+      cx.fillRect(Math.min(A.x, B.x), Math.min(A.y, B.y), Math.abs(B.x - A.x), Math.abs(B.y - A.y));
+      cx.strokeRect(Math.min(A.x, B.x), Math.min(A.y, B.y), Math.abs(B.x - A.x), Math.abs(B.y - A.y));
+      cx.setLineDash([]); ln(A, B); dot(A); dot(B);
+      const txt = `${dp >= 0 ? '+' : ''}${fmtP(dp)} (${pct.toFixed(2)}%)  ${bars} bars`;
+      tag(txt, Math.min(A.x, B.x) + Math.abs(B.x - A.x) / 2 - 60, (dp >= 0 ? Math.min(A.y, B.y) - 14 : Math.max(A.y, B.y) + 14), col);
+      break;
+    }
+    case 'text': {
+      cx.font = 'bold 13px Segoe UI, Arial'; cx.textBaseline = 'middle';
+      const w = cx.measureText(o.text || '').width + 12;
+      cx.fillStyle = '#0b0f14cc'; cx.fillRect(A.x, A.y - 11, w, 22);
+      cx.strokeStyle = o.color; cx.lineWidth = hl ? 2.4 : 1; cx.strokeRect(A.x, A.y - 11, w, 22);
+      cx.fillStyle = o.color; cx.fillText(o.text || '', A.x + 6, A.y);
+      break;
+    }
+  }
+}
+function dseg(mx, my, A, B) {
+  const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((mx - A.x) * dx + (my - A.y) * dy) / L2 : 0; t = Math.max(0, Math.min(1, t));
+  return Math.hypot(mx - (A.x + t * dx), my - (A.y + t * dy));
+}
+function hit(o, mx, my) {
+  const A = px(o.a); if (!A) return false; const B = o.b ? px(o.b) : null; const T = 8;
+  switch (o.type) {
+    case 'trend': return !!B && dseg(mx, my, A, B) < T;
+    case 'ray': return !!B && dseg(mx, my, A, rayEnd(A, B)) < T;
+    case 'hline': return Math.abs(my - A.y) < T;
+    case 'vline': return Math.abs(mx - A.x) < T;
+    case 'rect': { if (!B) return false; return mx >= Math.min(A.x, B.x) - T && mx <= Math.max(A.x, B.x) + T && my >= Math.min(A.y, B.y) - T && my <= Math.max(A.y, B.y) + T; }
+    case 'fib': { if (!B) return false; const x1 = Math.min(A.x, B.x), x2 = Math.max(Math.max(A.x, B.x), x1 + 90); return mx >= x1 - T && mx <= x2 + T && my >= Math.min(A.y, B.y) - T && my <= Math.max(A.y, B.y) + T; }
+    case 'text': return mx >= A.x - 4 && mx <= A.x + 140 && Math.abs(my - A.y) < 14;
+  }
+  return false;
+}
+function hitTest(mx, my) {
+  for (let i = drawings.length - 1; i >= 0; i--) if (hit(drawings[i], mx, my)) return drawings[i].id;
+  return null;
+}
+function render() {
+  const r = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const W = Math.round(r.width), H = Math.round(r.height);
+  if (!W || !H) return;
+  if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  cx.setTransform(dpr, 0, 0, dpr, 0, 0); cx.clearRect(0, 0, W, H);
+  let psw = 72; try { psw = charts[0].priceScale('right').width() || 72; } catch (e) {}
+  const plotW = W - psw;
+  let prev = null;
+  if (pending && mouse && TWO.includes(tool)) prev = {type: tool, a: pending.a, b: {t: mouse.t, p: mouse.p}, color: curColor};
+  const all = drawings.concat(measureObj ? [measureObj] : [], prev ? [prev] : []);
+  cx.save(); cx.beginPath(); cx.rect(0, 0, plotW, H); cx.clip();
+  all.forEach(o => drawObj(o, plotW, H, o.id && o.id === hoverId));
+  cx.restore();
+  all.forEach(o => {
+    if (o.type !== 'hline') return;
+    const y = candleS.priceToCoordinate(o.a.p); if (y == null) return;
+    cx.font = '11px Segoe UI, Arial'; cx.fillStyle = o.color; cx.fillRect(plotW + 1, y - 9, psw - 2, 18);
+    cx.fillStyle = '#000'; cx.textBaseline = 'middle'; cx.fillText(fmtP(o.a.p), plotW + 6, y);
+  });
+}
+let lastSig = '';
+function loop() {
+  try {
+    const vr = charts[0].timeScale().getVisibleLogicalRange();
+    const r = cv.getBoundingClientRect();
+    let psw = 0; try { psw = charts[0].priceScale('right').width(); } catch (e) {}
+    const sig = [vr ? vr.from.toFixed(3) : 0, vr ? vr.to.toFixed(3) : 0, candleS.coordinateToPrice(0), candleS.coordinateToPrice(r.height), r.width, r.height, psw, ver, tool, hoverId].join('|');
+    if (sig !== lastSig) { lastSig = sig; render(); }
+  } catch (e) {}
+  requestAnimationFrame(loop);
+}
+
+function setTool(t) {
+  tool = t; pending = null; measureObj = null; hoverId = null; ver++;
+  cv.style.pointerEvents = t === 'cursor' ? 'none' : 'auto';
+  cv.style.cursor = t === 'eraser' ? 'pointer' : 'crosshair';
+  document.querySelectorAll('#dtools [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+}
+function finish(b) {
+  const o = {id: Date.now() + '' + Math.floor(Math.random() * 1000), type: tool, a: pending.a, b, color: curColor};
+  const t = tool; pending = null;
+  setTool('cursor');
+  if (t === 'measure') { measureObj = o; ver++; } else { drawings.push(o); saveDr(); }
+}
+cv.addEventListener('mousemove', e => {
+  const p = evPoint(e); if (!p) return;
+  mouse = p;
+  if (tool === 'eraser') hoverId = hitTest(p.x, p.y);
+  if (pending || tool === 'eraser') ver++;
+});
+cv.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  const p = evPoint(e); if (!p) return;
+  if (tool === 'eraser') {
+    const id = hitTest(p.x, p.y);
+    if (id) { drawings = drawings.filter(d => d.id !== id); hoverId = null; saveDr(); }
+    return;
+  }
+  if (tool === 'hline' || tool === 'vline') {
+    drawings.push({id: Date.now() + '' + Math.floor(Math.random() * 1000), type: tool, a: {t: p.t, p: p.p}, color: curColor});
+    saveDr(); setTool('cursor'); return;
+  }
+  if (tool === 'text') {
+    const txt = window.prompt('Text likhun:', '');
+    if (txt) { drawings.push({id: Date.now() + '' + Math.floor(Math.random() * 1000), type: 'text', a: {t: p.t, p: p.p}, text: txt, color: curColor}); saveDr(); }
+    setTool('cursor'); return;
+  }
+  if (TWO.includes(tool)) {
+    if (!pending) { pending = {a: {t: p.t, p: p.p}, cx: e.clientX, cy: e.clientY}; ver++; }
+    else finish({t: p.t, p: p.p});
+  }
+});
+cv.addEventListener('mouseup', e => {
+  if (!pending) return;
+  if (Math.hypot(e.clientX - pending.cx, e.clientY - pending.cy) > 8) {
+    const p = evPoint(e); if (p) finish({t: p.t, p: p.p});
+  }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { setTool('cursor'); } });
+document.querySelectorAll('#dtools [data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+$('#dUndo').onclick = () => { drawings.pop(); saveDr(); };
+$('#dClear').onclick = () => { if (drawings.length && confirm(sym + ' er shob drawing muchhbo?')) { drawings = []; saveDr(); } };
+$('#dMagnet').onclick = () => { magnet = !magnet; localStorage.setItem('magnet', magnet ? '1' : '0'); $('#dMagnet').classList.toggle('on', magnet); };
+$('#dColor').value = curColor;
+$('#dColor').addEventListener('input', e => { curColor = e.target.value; localStorage.setItem('dcolor', curColor); });
+$('#dMagnet').classList.toggle('on', magnet);
+
+// ---------- top bar
+function buildTf() {
+  $('#tfs').innerHTML = TFS.map(x => `<button data-tf="${x}" class="${x === tf ? 'on' : ''}">${x}</button>`).join('');
+}
+$('#tfs').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  tf = b.dataset.tf; loadedCandleKey = null; localStorage.setItem('tf', tf); buildTf(); load(true); connectWS();
+});
+function setSym(s) {
+  s = (s || '').toUpperCase().trim(); if (!s) return;
+  if (sym === s) return;
+  sym = s; loadedCandleKey = null; localStorage.setItem('sym', sym); $('#sym').value = sym;
+  $('#msg').textContent = 'Loading ' + sym + '...';
+  document.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r.dataset.s === sym));
+  loadDr(); setTool('cursor');
+  load(true); connectWS();
+}
+$('#sym').addEventListener('change', e => setSym(e.target.value));
+
+const vis = {ema:true, vol:true, rsi:true, macd:true};
+function applyVis() {
+  ema20S.applyOptions({visible: vis.ema}); ema50S.applyOptions({visible: vis.ema});
+  const show = {p2: vis.vol, p3: vis.rsi, p4: vis.macd};
+  Object.keys(show).forEach(k => document.getElementById(k).style.display = show[k] ? '' : 'none');
+  const order = ['p1','p2','p3','p4'].filter(k => k === 'p1' || show[k]);
+  const last = order[order.length - 1];
+  ids.forEach((id, i) => charts[i].applyOptions({timeScale:{visible: id === last}}));
+  ver++;
+}
+document.querySelectorAll('[data-i]').forEach(b => b.addEventListener('click', () => {
+  const k = b.dataset.i; vis[k] = !vis[k]; b.classList.toggle('on', vis[k]); applyVis();
+}));
+
+// ---------- right sidebar
+document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  ['watch','signal','pos'].forEach(t => document.getElementById('tab-' + t).style.display = t === b.dataset.t ? '' : 'none');
+  if (b.dataset.t !== 'watch') loadSP();
+}));
+// Output encoding prevents external API values from injecting HTML.
+const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+const pick = (obj, ...keys) => {
+  for (const k of keys) if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+  return null;
+};
+const fmt = (value, decimals=1) => {
+  if (value === null || value === undefined || value === '') return '—';
+  const n = Number(value); return Number.isFinite(n) ? n.toFixed(decimals) : esc(value);
+};
+const raw = value => (value === null || value === undefined || value === '') ? '—' : esc(value);
+const directional = side => String(side || '').toUpperCase() === 'LONG' ? 'positive' : String(side || '').toUpperCase() === 'SHORT' ? 'negative' : '';
+const humanKey = key => key.replace(/_/g,' ').replace(/\b\w/g, m => m.toUpperCase());
+const extraDetails = (obj, ignored=[]) => {
+  const keys = Object.keys(obj || {}).filter(k => !ignored.includes(k) && obj[k] != null && obj[k] !== '');
+  if (!keys.length) return '<span class="dim">Additional details not returned by API.</span>';
+  return `<div class="details-grid">${keys.map(k => `<div><span class="k">${esc(humanKey(k))}:</span> <span class="v">${raw(typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : obj[k])}</span></div>`).join('')}</div>`;
+};
+const watchCols = [
+  ['#',r => raw(r.rank)],
+  ['Symbol',r => `<span class="symname">${raw(r.symbol)}</span>`],
+  ['Side',r => `<span class="${directional(r.side)}">${raw(r.side)}</span>`],
+  ['Score',r => fmt(pick(r,'rank_score','score'),1)],
+  ['Trend',r => fmt(pick(r,'trend_score','trend','trend_pts'),1)],
+  ['Volume',r => fmt(pick(r,'volume_score','vol_score','volume_pts'),1)],
+  ['OI',r => fmt(pick(r,'oi_score','open_interest_score','oi_pts'),1)]
+];
+let uniLoaded = false, expandedWatch = null;
+function watchTable(rows, kind) {
+  if (!rows.length) return '<div class="note">No ranking data</div>';
+  const head = `<div class="terminal-table-wrap"><table class="terminal-table"><thead><tr>${watchCols.map(([label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>`;
+  const body = rows.map((r,i) => {
+    const id = kind + ':' + (r.symbol || '') + ':' + i;
+    const opened = id === expandedWatch;
+    const cells = watchCols.map(([label, get]) => `<td class="${['#','Score','Trend','Volume','OI'].includes(label)?'num':''}">${get(r)}</td>`).join('');
+    const detail = opened ? `<tr class="detail-row"><td colspan="7"><strong>Why this rank?</strong><div style="margin:5px 0;color:#91a9c4">Ranking uses multiple scored factors; the actual API fields are shown below.</div>${extraDetails(r,['symbol','rank','side','rank_score','score','trend_score','trend','trend_pts','volume_score','vol_score','volume_pts','oi_score','open_interest_score','oi_pts'])}</td></tr>` : '';
+    return `<tr class="${r.symbol === sym?'sel':''}" data-s="${esc(r.symbol)}" data-watch-id="${esc(id)}" title="Click to select and expand">${cells}</tr>${detail}`;
+  }).join('');
+  return head + body + '</tbody></table></div>';
+}
+async function loadWatch() {
+  let d; try { const res = await fetch('/api/watch'); if(!res.ok) throw Error(); d = await res.json(); } catch(e) { return; }
+  const rank = Array.isArray(d.rank) ? d.rank : [], watch = Array.isArray(d.watch) ? d.watch : [];
+  if (!uniLoaded && Array.isArray(d.universe) && d.universe.length) {
+    $('#ulist').innerHTML = d.universe.map(s => `<option value="${esc(s)}">`).join(''); uniLoaded = true;
+  }
+  let h = `<div class="section-toolbar"><strong>HOURLY TOP ${rank.length}</strong><span>${raw(d.run_hour)}</span></div>`;
+  h += watchTable(rank, 'hourly');
+  h += `<div class="section-toolbar"><strong>DAILY WATCHLIST ${watch.length}</strong><span>${raw(d.scan_date)}</span></div>`;
+  h += watchTable(watch, 'daily');
+  $('#tab-watch').innerHTML = h;
+  if (rank.length && !localStorage.getItem('sym') && !window._init) { window._init = 1; setSym(rank[0].symbol); }
+}
+$('#tab-watch').addEventListener('click', e => {
+  const r = e.target.closest('tr[data-watch-id]'); if (!r) return;
+  expandedWatch = expandedWatch === r.dataset.watchId ? null : r.dataset.watchId;
+  setSym(r.dataset.s);
+  // Expand locally and refresh from the API at the regular interval.
+  loadWatch();
+});
+function signalCard(r) {
+  const symbol = pick(r,'symbol','coin') || 'UNKNOWN';
+  const side = pick(r,'side','direction') || '—';
+  const strat = pick(r,'strategy','strategy_name','setup','pattern') || 'Strategy not provided';
+  const entry = pick(r,'entry_price','entry','price','signal_price');
+  const sl = pick(r,'stop_loss','sl','stop_price');
+  const tp = pick(r,'take_profit','tp','tp_price');
+  const action = pick(r,'action','status','execution_status') || '—';
+  const when = pick(r,'created_at','signal_time','timestamp','time','ts') || '—';
+  const reason = pick(r,'reason','note','details','message','why');
+  const rank = pick(r,'rank','watch_rank','ranking');
+  const atr = pick(r,'atr','atr_15m');
+  const risk = Number(entry) && Number(sl) ? Math.abs(Number(entry)-Number(sl)) : null;
+  const reward = tp != null && entry != null ? Math.abs(Number(tp)-Number(entry)) : null;
+  const rr = risk && reward != null && Number.isFinite(reward/risk) ? (reward/risk).toFixed(2)+':1' : '—';
+  const ignored = ['symbol','coin','side','direction','strategy','strategy_name','setup','pattern','entry_price','entry','price','signal_price','stop_loss','sl','stop_price','take_profit','tp','tp_price','action','status','execution_status','created_at','signal_time','timestamp','time','ts','reason','note','details','message','why','rank','watch_rank','ranking','atr','atr_15m'];
+  return `<article class="sig-card">
+    <div class="sig-head"><span class="sig-symbol">${raw(symbol)}</span><span class="tag ${esc(String(side).toUpperCase())}">${raw(side)}</span></div>
+    <div class="sig-meta"><span>${raw(strat)}</span><span>${raw(when)}</span></div>
+    <div class="sig-prices"><div class="sig-price"><small>ENTRY</small><strong>${entry == null?'—':priceText(entry)}</strong></div><div class="sig-price"><small>STOP LOSS</small><strong class="negative">${sl == null?'—':priceText(sl)}</strong></div><div class="sig-price"><small>TAKE PROFIT</small><strong class="positive">${tp == null?'—':priceText(tp)}</strong></div></div>
+    <div class="sig-foot"><span>Rank ${raw(rank)}</span><span>ATR ${raw(atr)}</span><span>R:R ${rr}</span><span>${raw(action)}</span></div>
+    <details><summary>Strategy reason &amp; execution details</summary><div class="sig-reason">${reason == null ? 'Reason not returned by API.' : raw(reason)}</div>${extraDetails(r,ignored)}</details>
+  </article>`;
+}
+function renderSignals(data) {
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if (!rows.length) return `<div class="note">${raw(data.note || 'No signals')}</div>`;
+  return `<div class="section-toolbar"><strong>SIGNAL HISTORY</strong><span>${rows.length} signals</span></div><div class="signal-stack">${rows.map(signalCard).join('')}</div>`;
+}
+const positionCols = [
+  ['Symbol',r=>raw(pick(r,'symbol','coin'))],
+  ['Side',r=>`<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
+  ['Entry',r=>{let v=pick(r,'entry_price','entry');return v==null?'—':priceText(v)}],
+  ['Mark/Exit',r=>{let v=pick(r,'mark_price','current_price','exit_price','close_price');return v==null?'—':priceText(v)}],
+  ['SL',r=>{let v=pick(r,'stop_loss','sl');return v==null?'—':priceText(v)}],
+  ['TP',r=>{let v=pick(r,'take_profit','tp');return v==null?'—':priceText(v)}],
+  ['PnL',r=>{let v=pick(r,'unrealized_pnl','net_pnl','realized_pnl','pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${fmt(v,2)}</span>`}],
+  ['Status',r=>raw(pick(r,'status','state','result'))]
+];
+function renderPositions(data) {
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  if(!rows.length) return `<div class="note">${raw(data.note || 'No positions')}</div>`;
+  const headers = positionCols.map(([label])=>`<th>${esc(label)}</th>`).join('');
+  const body = rows.map((r,i)=>{
+    const values = positionCols.map(([label,get])=>`<td class="${['Entry','Mark/Exit','SL','TP','PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
+    return `<tr data-pos-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" id="position-detail-${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+  }).join('');
+  return `<div class="section-toolbar"><strong>POSITIONS / HISTORY</strong><span>${rows.length} records</span></div><div class="terminal-table-wrap"><table class="terminal-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+$('#tab-pos').addEventListener('click',e=>{
+  const row=e.target.closest('tr[data-pos-index]'); if(!row)return;
+  const detail=document.getElementById('position-detail-'+row.dataset.posIndex);
+  if(detail)detail.style.display=detail.style.display==='none'?'':'none';
+});
+async function loadSP() {
+  try {
+    const [sr,pr] = await Promise.all([fetch('/api/signals'),fetch('/api/positions')]);
+    if(!sr.ok||!pr.ok)throw new Error('API unavailable');
+    const [s,p]=await Promise.all([sr.json(),pr.json()]);
+    $('#tab-signal').innerHTML=renderSignals(s);
+    $('#tab-pos').innerHTML=renderPositions(p);
+  } catch(e) {
+    $('#tab-signal').innerHTML='<div class="note">Signal API unavailable</div>';
+    $('#tab-pos').innerHTML='<div class="note">Position API unavailable</div>';
+  }
+}
+
+// ---------- left sidebar: health
+const LBL = {ok:'OK', warn:'WARN', bad:'PROBLEM', idle:'IDLE'};
+async function health() {
+  let d; try { d = await (await fetch('/api/health')).json(); } catch(e) { $('#sum').textContent = 'Server e connect hocche na'; return; }
+  const bad = d.items.filter(i => i.status === 'bad').length, warn = d.items.filter(i => i.status === 'warn').length;
+  $('#sum').innerHTML = bad ? `<span style="color:#ef5350">&#9679; ${bad} problem, ${warn} warning</span>` :
+    (warn ? `<span style="color:#f0b90b">&#9679; ${warn} warning</span>` : '<span style="color:#26a69a">&#9679; Shob engine thik ache</span>');
+  $('#hitems').innerHTML = d.items.map(i =>
+    `<div class="hi ${i.status}"><div class="n"><span class="dot"></span>${i.name}<span style="margin-left:auto;font-size:11px;color:#7d8896">${LBL[i.status]}</span></div>` +
+    `<div class="d">${i.detail}</div>` + (i.hint ? `<div class="h">${i.hint}</div>` : '') +
+    (i.fix ? `<button data-fix="${i.fix}">Fix: ${{backfill:'Gap fill',scan:'Daily scan',rank:'Hourly rank'}[i.fix]}</button>` : '') + '</div>').join('');
+  $('#errs').innerHTML = d.errors.length ? d.errors.map(e => `<div class="err">${e.replace(/</g,'&lt;')}</div>`).join('') : '<div class="note">Kono error/warning nai</div>';
+  const js = Object.entries(d.jobs);
+  $('#jobs').innerHTML = js.length ? js.map(([k, v]) => `${k}: ${v.running ? 'running...' : v.msg}`).join('<br>') : '-';
+}
+$('#hitems').addEventListener('click', async e => {
+  const b = e.target.closest('[data-fix]'); if (!b) return;
+  b.disabled = true; b.textContent = 'starting...';
+  try { await fetch('/api/fix/' + b.dataset.fix, {method:'POST'}); } catch(err) {}
+  setTimeout(health, 1500); setTimeout(health, 8000); setTimeout(() => { health(); loadWatch(); load(false); }, 20000);
+});
+$('#btnTest').onclick = () => { $('#sum').textContent = 'checking...'; health(); loadWatch(); load(false); };
+
+// ---------- init
+$('#sym').value = sym;
+buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch();
+requestAnimationFrame(loop);
+setInterval(health, 15000);
+setInterval(loadWatch, 60000);
+</script>
+</body>
+</html>

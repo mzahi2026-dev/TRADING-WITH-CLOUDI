@@ -144,14 +144,14 @@ def watch():
         sd = con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
         out["scan_date"] = sd
         if sd:
-            df = pd.read_sql_query("SELECT symbol, rank, side, score, close FROM watchlist "
+            df = pd.read_sql_query("SELECT symbol, rank, side, score, trend, volume, oi, close FROM watchlist "
                                    "WHERE scan_date=? ORDER BY rank", con, params=(sd,))
             out["watch"] = clean(df)
     if has_table(con, "ranking"):
         rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0]
         out["run_hour"] = rh
         if rh:
-            df = pd.read_sql_query("SELECT symbol, rank, side, rank_score, aligned, daily_score, "
+            df = pd.read_sql_query("SELECT symbol, rank, side, rank_score, trend, volume, oi, aligned, daily_score, "
                                    "close, quote_vol_24h FROM ranking WHERE run_hour=? ORDER BY rank",
                                    con, params=(rh,))
             out["rank"] = clean(df)
