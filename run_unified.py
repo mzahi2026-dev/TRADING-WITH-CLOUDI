@@ -86,17 +86,21 @@ def run_trader_worker():
 
 
 def start_collector_thread():
-    """Run async collector in background daemon thread."""
+    """Run async collector in background daemon thread with auto-supervision."""
     def _run():
-        clog.info("Starting WebSocket Data Collector in background...")
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(run_collector())
-        except Exception as e:
-            clog.error(f"Collector encountered error: {e}")
+        while True:
+            clog.info("Starting WebSocket Data Collector in background thread...")
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(run_collector())
+            except Exception as e:
+                clog.critical(f"Collector thread crashed: {e!r}. Respawning collector in 5s...")
+            finally:
+                loop.close()
+            time.sleep(5)
 
-    t = threading.Thread(target=_run, daemon=True)
+    t = threading.Thread(target=_run, daemon=True, name="CollectorSupervisionThread")
     t.start()
 
 

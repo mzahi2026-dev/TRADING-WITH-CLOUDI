@@ -101,21 +101,25 @@ async def ws_worker(name, symbols, queue, client, storage):
     )
     url = f"{config.WS_BASE}/stream?streams={streams}"
     first = True
+    delay = 3
 
     while True:
         try:
             async with websockets.connect(
-                url, ping_interval=20, ping_timeout=30, max_queue=None
+                url, ping_interval=20, ping_timeout=20, max_queue=None, close_timeout=10
             ) as ws:
                 log.info(f"WS-{name} connected ({len(symbols)} symbols)")
+                delay = 3
                 if not first:
-                    # reconnect er gap fill
-                    await asyncio.to_thread(backfill_symbols, client, storage, symbols)
+                    # reconnect er gap fill non-blocking
+                    try:
+                        await asyncio.to_thread(backfill_symbols, client, storage, symbols, True)
+                    except Exception as bfe:
+                        log.warning(f"WS-{name} reconnect backfill error: {bfe}")
                 first = False
 
                 while True:
-                    # 120s kono message na ashle connection dead dhore reconnect
-                    raw = await asyncio.wait_for(ws.recv(), timeout=120)
+                    raw = await asyncio.wait_for(ws.recv(), timeout=60)
                     msg = json.loads(raw)
                     d = msg.get("data", {})
                     if d.get("e") != "kline":
@@ -132,8 +136,9 @@ async def ws_worker(name, symbols, queue, client, storage):
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            log.warning(f"WS-{name} dropped: {e!r}. Reconnect in 5s")
-            await asyncio.sleep(5)
+            log.warning(f"WS-{name} dropped: {e!r}. Reconnect in {delay}s")
+            await asyncio.sleep(delay)
+            delay = min(30, delay * 1.5)
 
 
 async def writer(queue, storage):
@@ -182,37 +187,44 @@ def fetch_universe(client, storage):
 
 
 async def run():
-    storage = Storage()
-    client = BinanceClient()
-    queue = asyncio.Queue()
-
-    writer_task = asyncio.create_task(writer(queue, storage))
-
-    symbols = await asyncio.to_thread(fetch_universe, client, storage)
-    ws_tasks = start_ws(symbols, queue, client, storage)
-
-    log.info("Initial history download shuru (kichu minute lagbe)...")
-    await asyncio.to_thread(backfill_symbols, client, storage, symbols)
-    log.info("Kline history done. Extra data jobs shuru (OI, funding, L/S, taker)...")
-
-    extra_tasks = start_extra(client, storage, lambda: symbols)
-    gap_task = asyncio.create_task(gapfill_loop(client, storage, lambda: symbols))
-
     while True:
-        await asyncio.sleep(config.SYMBOL_REFRESH_HOURS * 3600)
         try:
-            new_symbols = await asyncio.to_thread(fetch_universe, client, storage)
-        except Exception as e:
-            log.error(f"Symbol refresh failed: {e}")
-            continue
+            storage = Storage()
+            client = BinanceClient()
+            queue = asyncio.Queue()
 
-        if set(new_symbols) != set(symbols):
-            added = set(new_symbols) - set(symbols)
-            removed = set(symbols) - set(new_symbols)
-            log.info(f"Universe changed. +{len(added)} -{len(removed)}")
-            for t in ws_tasks:
-                t.cancel()
-            await asyncio.gather(*ws_tasks, return_exceptions=True)
-            symbols = new_symbols
+            writer_task = asyncio.create_task(writer(queue, storage))
+
+            symbols = await asyncio.to_thread(fetch_universe, client, storage)
             ws_tasks = start_ws(symbols, queue, client, storage)
+
+            log.info("Initial history download shuru (kichu minute lagbe)...")
             await asyncio.to_thread(backfill_symbols, client, storage, symbols)
+            log.info("Kline history done. Extra data jobs shuru (OI, funding, L/S, taker)...")
+
+            extra_tasks = start_extra(client, storage, lambda: symbols)
+            gap_task = asyncio.create_task(gapfill_loop(client, storage, lambda: symbols))
+
+            while True:
+                await asyncio.sleep(config.SYMBOL_REFRESH_HOURS * 3600)
+                try:
+                    new_symbols = await asyncio.to_thread(fetch_universe, client, storage)
+                except Exception as e:
+                    log.error(f"Symbol refresh failed: {e}")
+                    continue
+
+                if set(new_symbols) != set(symbols):
+                    added = set(new_symbols) - set(symbols)
+                    removed = set(symbols) - set(new_symbols)
+                    log.info(f"Universe changed. +{len(added)} -{len(removed)}")
+                    for t in ws_tasks:
+                        t.cancel()
+                    await asyncio.gather(*ws_tasks, return_exceptions=True)
+                    symbols = new_symbols
+                    ws_tasks = start_ws(symbols, queue, client, storage)
+                    await asyncio.to_thread(backfill_symbols, client, storage, symbols)
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            log.critical(f"Collector main loop error: {e!r}. Restarting loop in 10s...")
+            await asyncio.sleep(10)
