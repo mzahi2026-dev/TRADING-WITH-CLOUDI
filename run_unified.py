@@ -218,21 +218,21 @@ def main():
     start_health_monitor()
 
     # 5. Start Dashboard
-    print("[4/4] Starting Dashboard on http://localhost:8080 ...")
+    print("[4/4] Starting Dashboard on http://localhost:8000 ...")
     print("=" * 65)
     print(" >>> SYSTEM RUNNING IN SINGLE CONSOLE WITH 100% PROTECTION! <<<")
-    print(" >>> Open: http://localhost:8080                            <<<")
+    print(" >>> Open: http://localhost:8000                            <<<")
     print(" >>> Press Ctrl+C anytime to stop all engines cleanly.      <<<")
     print("=" * 65)
 
     try:
         import webbrowser
-        webbrowser.open("http://localhost:8080")
+        webbrowser.open("http://localhost:8000")
     except Exception:
         pass
 
     try:
-        uvicorn.run(app_ui.app, host="127.0.0.1", port=8080, log_level="warning")
+        uvicorn.run(app_ui.app, host="127.0.0.1", port=8000, log_level="warning")
     finally:
         release_instance_lock()
         send_alert("🛑 *Trading System Stopped*\nAll background services have been stopped cleanly.")
