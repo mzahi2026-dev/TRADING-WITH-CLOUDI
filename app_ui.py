@@ -89,12 +89,28 @@ def candles(symbol: str, interval: str = "15m", limit: int = 600):
         "SELECT open_time, open, high, low, close, volume FROM klines "
         "WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?",
         con, params=(symbol, interval, limit + 300))
+    if df.empty:
+        con.close()
+        return {"candles": []}
+
+    # Ensure chronological order (oldest -> newest) BEFORE calculating indicators/levels
+    df = df.sort_values("open_time").reset_index(drop=True)
+
     lv = {}
-    if not df.empty and len(df) >= 20:
-        # Calculate dynamic recent swing Support & Resistance relative to current timeframe
+    if len(df) >= 20:
         cur_c = float(df["close"].iloc[-1])
-        # Look at last 60 candles on current chart
-        sub = df.tail(60).reset_index(drop=True)
+        # Calculate ATR for dynamic gap reference
+        highs, lows, closes = df["high"].values, df["low"].values, df["close"].values
+        tr = [highs[0] - lows[0]]
+        for i in range(1, len(df)):
+            tr.append(max(highs[i] - lows[i], abs(highs[i] - closes[i - 1]), abs(lows[i] - closes[i - 1])))
+        atr = pd.Series(tr).rolling(14).mean().iloc[-1]
+        if pd.isna(atr) or atr <= 0:
+            atr = cur_c * 0.015
+
+        # Look at last 150 candles on current chart for recent swing structure
+        window = min(len(df), 150)
+        sub = df.tail(window).reset_index(drop=True)
         hi, lo = sub["high"].values, sub["low"].values
         sw_highs, sw_lows = [], []
         k = 2
@@ -103,22 +119,37 @@ def candles(symbol: str, interval: str = "15m", limit: int = 600):
                 sw_highs.append(float(hi[i]))
             if lo[i] == lo[i - k:i + k + 1].min():
                 sw_lows.append(float(lo[i]))
-        
-        above = [h for h in sw_highs if h > cur_c]
-        below = [l for l in sw_lows if l < cur_c]
-        dyn_res = min(above) if above else float(sub["high"].max())
-        dyn_sup = max(below) if below else float(sub["low"].min())
-        lv = {"side": "DYNAMIC", "support": dyn_sup, "resistance": dyn_res}
+
+        buf = atr * 0.2
+        above = [h for h in sw_highs if h > cur_c + buf]
+        below = [l for l in sw_lows if l < cur_c - buf]
+
+        # If not enough swings in recent window, search wider dataset
+        if not above or not below:
+            hi_all, lo_all = df["high"].values, df["low"].values
+            for i in range(k, len(df) - k):
+                if not above and hi_all[i] == hi_all[i - k:i + k + 1].max() and hi_all[i] > cur_c + buf:
+                    above.append(float(hi_all[i]))
+                if not below and lo_all[i] == lo_all[i - k:i + k + 1].min() and lo_all[i] < cur_c - buf:
+                    below.append(float(lo_all[i]))
+
+        dyn_res = min(above) if above else (cur_c + 2.0 * atr)
+        dyn_sup = max(below) if below else (cur_c - 2.0 * atr)
+
+        # Invariant safety clamps: support must be < cur_c, resistance must be > cur_c
+        if dyn_sup >= cur_c:
+            dyn_sup = cur_c - 1.5 * atr
+        if dyn_res <= cur_c:
+            dyn_res = cur_c + 1.5 * atr
+
+        prec = 6 if cur_c < 0.01 else (5 if cur_c < 1 else (4 if cur_c < 100 else 2))
+        lv = {"side": "DYNAMIC", "support": float(round(dyn_sup, prec)), "resistance": float(round(dyn_res, prec))}
     elif has_table(con, "watchlist"):
         r = con.execute("SELECT side, support, resistance FROM watchlist "
                         "WHERE symbol=? ORDER BY scan_date DESC LIMIT 1", (symbol,)).fetchone()
         if r:
             lv = {"side": r[0], "support": r[1], "resistance": r[2]}
     con.close()
-    if df.empty:
-        return {"candles": []}
-
-    df = df.sort_values("open_time").reset_index(drop=True)
     c = df["close"]
     ema20 = c.ewm(span=20, adjust=False).mean()
     ema50 = c.ewm(span=50, adjust=False).mean()
