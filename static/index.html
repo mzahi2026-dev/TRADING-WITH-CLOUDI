@@ -626,12 +626,19 @@ document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click
 // Output encoding prevents external API values from injecting HTML.
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const pick = (obj, ...keys) => {
-  for (const k of keys) if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+  for (const k of keys) {
+    if (obj && obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+  }
   return null;
 };
 const fmt = (value, decimals=1) => {
   if (value === null || value === undefined || value === '') return '—';
-  const n = Number(value); return Number.isFinite(n) ? n.toFixed(decimals) : esc(value);
+  const n = Number(value);
+  if (Number.isFinite(n)) {
+    // If value is exactly 0 or near 0, format cleanly
+    return Math.abs(n) < 0.0001 ? '0.0' : n.toFixed(decimals);
+  }
+  return esc(value);
 };
 const raw = value => (value === null || value === undefined || value === '') ? '—' : esc(value);
 const directional = side => String(side || '').toUpperCase() === 'LONG' ? 'positive' : String(side || '').toUpperCase() === 'SHORT' ? 'negative' : '';
@@ -646,9 +653,9 @@ const watchCols = [
   ['Symbol',r => `<span class="symname">${raw(r.symbol)}</span>`],
   ['Side',r => `<span class="${directional(r.side)}">${raw(r.side)}</span>`],
   ['Score',r => fmt(pick(r,'rank_score','score'),1)],
-  ['Trend',r => fmt(pick(r,'trend_score','trend','trend_pts'),1)],
-  ['Volume',r => fmt(pick(r,'volume_score','vol_score','volume_pts'),1)],
-  ['OI',r => fmt(pick(r,'oi_score','open_interest_score','oi_pts'),1)]
+  ['Trend',r => fmt(pick(r,'trend','trend_score','trend_pts'),1)],
+  ['Volume',r => fmt(pick(r,'volume','volume_score','vol_score','vol_ratio','volume_pts'),1)],
+  ['OI',r => fmt(pick(r,'oi','oi_score','open_interest_score','oi_pts'),1)]
 ];
 let uniLoaded = false, expandedWatch = null;
 function watchTable(rows, kind) {
