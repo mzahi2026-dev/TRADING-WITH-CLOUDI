@@ -50,8 +50,17 @@ class DemoClient:
         self.sync_time()
 
     def sync_time(self):
-        r = requests.get(tc.DEMO_BASE + "/fapi/v1/time", timeout=10).json()
-        self.offset = int(r["serverTime"]) - int(time.time() * 1000)
+        last_e = None
+        for attempt in range(4):
+            try:
+                r = requests.get(tc.DEMO_BASE + "/fapi/v1/time", timeout=10).json()
+                self.offset = int(r["serverTime"]) - int(time.time() * 1000)
+                return
+            except Exception as e:
+                last_e = e
+                time.sleep(1)
+        if last_e:
+            raise last_e
 
     def _req(self, method, path, params=None, signed=True):
         last = None

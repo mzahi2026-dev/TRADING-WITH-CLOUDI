@@ -1,0 +1,32 @@
+# Environment & Secrets
+.env
+*.env
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Database & Storage
+data_store/
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime & Logs
+logs/
+*.log
+*.pid
+*.lock
+
+# Temporary & Backups
+*.backup
+*.tmp
+*.temp
+key_crop.png
+qr.png
