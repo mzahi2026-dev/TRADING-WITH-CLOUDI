@@ -677,45 +677,21 @@ async function runAnalysis() {
       title: 'TARGET 2'
     });
     analysisLines = [entryLine, slLine, tp1Line, tp2Line];
-
-    // Show popup summary modal
-    let modal = document.getElementById('analysis-modal');
-    if (!modal) {
-      modal = document.createElement('div');
-      modal.id = 'analysis-modal';
-      modal.style = `position:fixed;top:60px;right:380px;z-index:999;background:#111b27;border:1px solid #2b4566;border-radius:8px;padding:15px;width:320px;box-shadow:0 8px 24px rgba(0,0,0,0.6);font-size:12px;color:#d1d7e0`;
-      document.body.appendChild(modal);
-    }
-
-    modal.innerHTML = `
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f2f42;padding-bottom:8px;margin-bottom:10px">
-        <strong style="font-size:14px;color:#fff">${data.symbol} Trade Setup</strong>
-        <span style="cursor:pointer;font-size:16px;color:#8da2ba" onclick="this.parentElement.parentElement.remove();window.clearAnalysisLines();">&times;</span>
-      </div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
-        <span class="tag ${data.side}" style="font-size:12px;font-weight:700;padding:2px 8px">${data.side}</span>
-        <span style="font-weight:600;color:#e6edf5">${esc(data.strategy)}</span>
-      </div>
-      <div style="font-size:11px;color:#91a9c4;margin-bottom:12px;background:#0d1520;padding:6px;border-radius:4px">${esc(data.reason)}</div>
-      <table style="width:100%;margin-bottom:10px;font-size:12px">
-        <tr><td style="color:#8da2ba;padding:3px 0">Entry Price:</td><td style="text-align:right;font-weight:700;color:#4aa3ff">${data.entry}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">Stop Loss (SL):</td><td style="text-align:right;font-weight:700;color:#ef5350">${data.sl}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">Take Profit (TP1):</td><td style="text-align:right;font-weight:700;color:#26a69a">${data.tp1}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">Extended TP2:</td><td style="text-align:right;font-weight:700;color:#00e676">${data.tp2}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">Risk/Reward:</td><td style="text-align:right;font-weight:700;color:#f0b90b">${data.risk_reward}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">ATR (Volatility):</td><td style="text-align:right">${data.atr}</td></tr>
-        <tr><td style="color:#8da2ba;padding:3px 0">RSI (14):</td><td style="text-align:right">${data.rsi}</td></tr>
-      </table>
-      <div style="font-size:10px;color:#70869e;text-align:center">Chart e Entry, SL, TP হরিজন্টাল লাইন আঁকা হয়েছে</div>
-    `;
-    window.clearAnalysisLines = clearAnalysisLines;
+    btn.classList.add('on');
   } catch(e) {
     alert('Error getting analysis: ' + e);
   } finally {
     btn.textContent = '⚡ Analysis';
   }
 }
-$('#btnAnalysis').addEventListener('click', runAnalysis);
+$('#btnAnalysis').addEventListener('click', () => {
+  if (analysisLines.length) {
+    clearAnalysisLines();
+    $('#btnAnalysis').classList.remove('on');
+  } else {
+    runAnalysis();
+  }
+});
 
 // ---------- right sidebar
 document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
