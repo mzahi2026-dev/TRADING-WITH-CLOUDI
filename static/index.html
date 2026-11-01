@@ -90,6 +90,10 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 .pos-table .num{text-align:right}
 .pos-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
 .pos-table .detail-row{cursor:default}
+.pos-subnav{display:flex;gap:5px;padding:6px 10px;background:#0d141e;border-bottom:1px solid #1f2b3a}
+.pos-subbtn{background:#151f2b;border:1px solid #233448;color:#94a7bd;font-size:11px;padding:4px 9px;border-radius:4px;cursor:pointer}
+.pos-subbtn:hover{background:#1d2c3e;color:#fff}
+.pos-subbtn.on{background:#233d5d;border-color:#38608f;color:#fff;font-weight:600}
 
 .terminal-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
 .terminal-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 4px}
@@ -833,27 +837,84 @@ function renderSignals(data) {
   if (!rows.length) return `<div class="note">${raw(data.note || 'No signals')}</div>`;
   return `<div class="section-toolbar"><strong>SIGNAL HISTORY</strong><span>${rows.length} signals</span></div><div class="signal-stack">${rows.map(signalCard).join('')}</div>`;
 }
-const positionCols = [
-  ['Symbol', 'col-sym', r=>raw(pick(r,'symbol','coin'))],
-  ['Side', 'col-side', r=>`<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
-  ['Entry', 'col-entry', r=>{let v=pick(r,'entry_price','entry');return (v==null||Number(v)<=0)?'—':priceText(v)}],
-  ['Mark/Exit', 'col-mark', r=>{let v=pick(r,'mark_price','current_price','exit_price','close_price');return (v==null||Number(v)<=0)?'—':priceText(v)}],
-  ['SL', 'col-sl', r=>{let v=pick(r,'stop_loss','sl');return (v==null||Number(v)<=0)?'—':priceText(v)}],
-  ['TP', 'col-tp', r=>{let v=pick(r,'take_profit','tp');return (v==null||Number(v)<=0)?'—':priceText(v)}],
-  ['PnL', 'col-pnl', r=>{let v=pick(r,'unrealized_pnl','net_pnl','realized_pnl','pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${fmt(v,2)}</span>`}],
-  ['Status', 'col-status', r=>raw(pick(r,'status','state','result'))]
-];
+let posSubView = localStorage.getItem('pos_sub_view') || 'all';
+
+function renderPosTable(rows, isHistory, offset=0) {
+  if (!rows.length) return `<div class="note" style="padding:10px">${isHistory ? 'No trade history yet' : 'No open positions'}</div>`;
+  const cols = isHistory ? [
+    ['Symbol', 'col-sym', r => raw(pick(r,'symbol','coin'))],
+    ['Side', 'col-side', r => `<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
+    ['Entry', 'col-entry', r => { let v=pick(r,'entry_price','entry'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['Exit', 'col-mark', r => { let v=pick(r,'exit_price','close_price','mark_price','current_price'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['SL', 'col-sl', r => { let v=pick(r,'stop_loss','sl'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['TP', 'col-tp', r => { let v=pick(r,'take_profit','tp'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['Net PnL', 'col-pnl', r => { let v=pick(r,'net_pnl','realized_pnl','pnl','unrealized_pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${Number(v)>=0?'+':''}${fmt(v,2)}</span>`; }],
+    ['Result', 'col-status', r => raw(pick(r,'result','status','state'))]
+  ] : [
+    ['Symbol', 'col-sym', r => raw(pick(r,'symbol','coin'))],
+    ['Side', 'col-side', r => `<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
+    ['Entry', 'col-entry', r => { let v=pick(r,'entry_price','entry'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['Mark', 'col-mark', r => { let v=pick(r,'mark_price','current_price'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['SL', 'col-sl', r => { let v=pick(r,'stop_loss','sl'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['TP', 'col-tp', r => { let v=pick(r,'take_profit','tp'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
+    ['PnL', 'col-pnl', r => { let v=pick(r,'unrealized_pnl','pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${Number(v)>=0?'+':''}${fmt(v,2)}</span>`; }],
+    ['Status', 'col-status', r => raw(pick(r,'status','state'))]
+  ];
+
+  const headers = cols.map(([label, cls]) => `<th class="${cls}">${esc(label)}</th>`).join('');
+  const body = rows.map((r, i) => {
+    const idx = offset + i;
+    const values = cols.map(([label, cls, get]) => `<td class="${cls} ${['Entry','Exit','Mark','SL','TP','PnL','Net PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
+    return `<tr data-pos-index="${idx}" title="Click for details">${values}</tr><tr class="detail-row" data-detail-index="${idx}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+  }).join('');
+  return `<div class="terminal-table-wrap"><table class="pos-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
 function renderPositions(data) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
-  if(!rows.length) return `<div class="note">${raw(data.note || 'No positions')}</div>`;
-  const headers = positionCols.map(([label, cls])=>`<th class="${cls}">${esc(label)}</th>`).join('');
-  const body = rows.map((r,i)=>{
-    const values = positionCols.map(([label, cls, get])=>`<td class="${cls} ${['Entry','Mark/Exit','SL','TP','PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
-    return `<tr data-pos-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" data-detail-index="${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
-  }).join('');
-  return `<div class="section-toolbar"><strong>POSITIONS / HISTORY</strong><span>${rows.length} records</span></div><div class="terminal-table-wrap"><table class="pos-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
+  if (!rows.length) return `<div class="note">${raw(data.note || 'No positions recorded')}</div>`;
+
+  const openRows = rows.filter(r => ['OPEN', 'EMERGENCY_UNPROTECTED'].includes(String(pick(r, 'status', 'state') || '').toUpperCase()));
+  const historyRows = rows.filter(r => !['OPEN', 'EMERGENCY_UNPROTECTED'].includes(String(pick(r, 'status', 'state') || '').toUpperCase()));
+
+  const subNav = `
+    <div class="pos-subnav">
+      <button class="pos-subbtn ${posSubView==='all'?'on':''}" data-pv="all">All (${rows.length})</button>
+      <button class="pos-subbtn ${posSubView==='open'?'on':''}" data-pv="open">🟢 Positions (${openRows.length})</button>
+      <button class="pos-subbtn ${posSubView==='history'?'on':''}" data-pv="history">📜 Trade History (${historyRows.length})</button>
+    </div>
+  `;
+
+  let content = '';
+  if (posSubView === 'all' || posSubView === 'open') {
+    content += `
+      <div class="section-toolbar">
+        <strong>🟢 ACTIVE POSITIONS</strong>
+        <span>${openRows.length} open</span>
+      </div>
+      ${renderPosTable(openRows, false, 0)}
+    `;
+  }
+  if (posSubView === 'all' || posSubView === 'history') {
+    content += `
+      <div class="section-toolbar" style="margin-top:${posSubView==='all'?'10px':'0'}">
+        <strong>📜 TRADE HISTORY</strong>
+        <span>${historyRows.length} closed</span>
+      </div>
+      ${renderPosTable(historyRows, true, openRows.length)}
+    `;
+  }
+
+  return subNav + content;
 }
 document.addEventListener('click', e => {
+  const btn = e.target.closest('.pos-subbtn');
+  if (btn) {
+    posSubView = btn.dataset.pv;
+    localStorage.setItem('pos_sub_view', posSubView);
+    loadSP();
+    return;
+  }
   const row = e.target.closest('tr[data-pos-index]');
   if (!row) return;
   const idx = row.dataset.posIndex;
