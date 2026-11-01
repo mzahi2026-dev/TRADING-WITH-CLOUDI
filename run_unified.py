@@ -93,6 +93,13 @@ def run_scanner_worker():
                 max_instances=1,
                 coalesce=True,
             )
+            from app.notifier import send_hourly_report
+            sched.add_job(
+                send_hourly_report,
+                CronTrigger(minute=16, timezone="Asia/Dhaka"),
+                max_instances=1,
+                coalesce=True,
+            )
             sched.start()
             clog.info("Scanner & Ranker Scheduler started (06:02 & :12 BDT)")
 

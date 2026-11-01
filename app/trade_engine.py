@@ -356,6 +356,21 @@ class Engine:
         con.close()
         log.info(f"OPENED {sym} {side} {name} | entry {entry} SL {sl} TP {tp} qty {amt}"
                  f"{'' if tp_ok else ' (TP missing)'}")
+        try:
+            from .notifier import send_alert
+            send_alert(
+                f"🚀 <b>TRADE OPENED</b>\n\n"
+                f"• <b>Symbol:</b> {sym} ({side})\n"
+                f"• <b>Strategy:</b> {name}\n"
+                f"• <b>Entry:</b> {entry}\n"
+                f"• <b>Qty:</b> {amt}\n"
+                f"• <b>Stop Loss (SL):</b> {sl}\n"
+                f"• <b>Take Profit (TP):</b> {tp}\n"
+                f"• <b>Mode:</b> {'DRY RUN' if self.dry else 'BINANCE DEMO FUTURES'}",
+                parse_mode="HTML"
+            )
+        except Exception as te:
+            log.warning(f"Telegram alert error on open: {te}")
         return True, ""
 
     # ------------------------------------------------------------ reconcile
@@ -458,3 +473,19 @@ class Engine:
                     "WHERE id=?", (ex, round(net, 4), round(fee, 4), res, bdt(), pid))
         con.commit()
         log.info(f"CLOSED {sym} {side} {res} | exit {ex:.6g} | net {net:+.4f} USDT (fee {fee:.4f})")
+        try:
+            from .notifier import send_alert
+            pnl_icon = "💰" if net > 0 else "🛑"
+            send_alert(
+                f"{pnl_icon} <b>TRADE CLOSED ({res})</b>\n\n"
+                f"• <b>Symbol:</b> {sym} ({side})\n"
+                f"• <b>Result:</b> {res}\n"
+                f"• <b>Entry:</b> {entry}\n"
+                f"• <b>Exit:</b> {ex:.6g}\n"
+                f"• <b>Net PnL:</b> {net:+.4f} USDT\n"
+                f"• <b>Fee:</b> {fee:.4f} USDT\n"
+                f"• <b>Mode:</b> {'DRY RUN' if self.dry else 'BINANCE DEMO FUTURES'}",
+                parse_mode="HTML"
+            )
+        except Exception as te:
+            log.warning(f"Telegram alert error on close: {te}")

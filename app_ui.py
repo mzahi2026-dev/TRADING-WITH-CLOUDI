@@ -502,7 +502,7 @@ def health():
 @app.post("/api/fix/{action}")
 def fix(action: str, request: Request):
     check_auth(request)
-    if action not in ("scan", "rank", "backfill", "extra"):
+    if action not in ("scan", "rank", "backfill", "extra", "report"):
         raise HTTPException(400, "unknown action")
     if JOBS.get(action, {}).get("running"):
         return {"ok": False, "msg": "already running"}
@@ -510,7 +510,10 @@ def fix(action: str, request: Request):
     def work():
         JOBS[action] = {"running": True, "msg": "running...", "started": int(time.time() * 1000)}
         try:
-            if action == "scan":
+            if action == "report":
+                from app.notifier import send_hourly_report
+                send_hourly_report()
+            elif action == "scan":
                 from app.scanner import run_scan
                 run_scan(wait=False)
             elif action == "rank":
