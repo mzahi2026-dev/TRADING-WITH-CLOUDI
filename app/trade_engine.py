@@ -119,17 +119,33 @@ class Engine:
             self.reconcile()
         con = self.db()
         try:
+            # 1. Candidate Symbols: Direct Watchlist (Top 20 high-volume coins) + Hourly Ranking
+            sd = con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
+            candidates = []
+            if sd:
+                wl_df = pd.read_sql_query(
+                    "SELECT w.symbol, w.rank, COALESCE(u.quote_volume_24h, 0.0) as quote_vol_24h "
+                    "FROM watchlist w "
+                    "LEFT JOIN universe u ON w.symbol = u.symbol "
+                    "WHERE w.scan_date=? ORDER BY w.score DESC LIMIT 25", con, params=(sd,))
+                candidates = wl_df.to_dict("records")
+
             rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0]
-            if not rh:
-                log.warning("Ranking nai. Scheduler (scanner_main.py) chalu ache?")
+            if rh:
+                rk_df = pd.read_sql_query(
+                    "SELECT symbol, rank, quote_vol_24h FROM ranking WHERE run_hour=? ORDER BY rank",
+                    con, params=(rh,))
+                seen = {c["symbol"] for c in candidates}
+                for r in rk_df.to_dict("records"):
+                    if r["symbol"] not in seen:
+                        candidates.append(r)
+
+            # Filter candidates with min volume >= $15M
+            candidates = [c for c in candidates if float(c.get("quote_vol_24h", 0)) >= tc.MIN_VOL_24H][:20]
+            if not candidates:
+                log.warning("Kono active candidate symbol nai. Scanner chalu ache?")
                 return
-            rk = pd.read_sql_query(
-                "SELECT symbol, rank, side, quote_vol_24h, created_at FROM ranking "
-                "WHERE run_hour=? ORDER BY rank", con, params=(rh,))
-            age = (time.time() * 1000 - rk["created_at"].max()) / 60000
-            if age > tc.RANK_MAX_AGE_MIN:
-                log.warning(f"Ranking purono ({age:.0f} min, {rh}). Cycle skip.")
-                return
+
             # Risk Limit: Daily drawdown / loss circuit breaker
             day_cutoff = int(time.time() * 1000) - 24 * 3600 * 1000
             daily_loss = con.execute(
@@ -151,17 +167,17 @@ class Engine:
                 except Exception as e:
                     log.warning(f"Failed to check balance risk limit: {e}")
 
-            syms = rk["symbol"].tolist()
+            syms = [c["symbol"] for c in candidates]
             ph = ",".join("?" * len(syms))
             n = 0
             for _ in range(12):
                 n = con.execute(f"SELECT COUNT(DISTINCT symbol) FROM klines WHERE interval='15m' "
                                 f"AND open_time=? AND symbol IN ({ph})", [exp_open] + syms).fetchone()[0]
-                if n >= 0.8 * len(syms):
+                if n >= 0.5 * len(syms):
                     break
                 time.sleep(10)
 
-            if n < 0.6 * len(syms):
+            if n < 0.4 * len(syms):
                 log.warning(f"Data not ready: only {n}/{len(syms)} symbols have 15m candle. Skipping trading cycle.")
                 return
 
@@ -171,9 +187,11 @@ class Engine:
             n_open = len(open_syms)
             checked = nsig = taken = 0
 
-            for r in rk.itertuples():
-                sym, side = r.symbol, r.side
-                if sym in open_syms or sym in cool or r.quote_vol_24h < tc.MIN_VOL_24H:
+            for r in candidates:
+                sym = r["symbol"]
+                rnk = r.get("rank", 99)
+                vol_24h = float(r.get("quote_vol_24h", 0))
+                if sym in open_syms or sym in cool or vol_24h < tc.MIN_VOL_24H:
                     continue
                 df = pd.read_sql_query(
                     "SELECT open_time, open, high, low, close, volume, taker_buy_base FROM klines "
@@ -187,9 +205,23 @@ class Engine:
                     log.warning(f"{sym}: 15m candle gap detected, skipping entry")
                     continue
                 checked += 1
-                ev = evaluate(df, side)
-                if not ev or not ev["hits"]:
+
+                # INDEPENDENT DIRECTION: Evaluate BOTH LONG and SHORT setups on 15m price action!
+                ev_long = evaluate(df, "LONG")
+                ev_short = evaluate(df, "SHORT")
+
+                ev = None
+                side = None
+                if ev_long and ev_long.get("hits") and ev_short and ev_short.get("hits"):
+                    ev, side = (ev_long, "LONG") if abs(ev_long["close"] - df["close"].iloc[-2]) >= 0 else (ev_short, "SHORT")
+                elif ev_long and ev_long.get("hits"):
+                    ev, side = ev_long, "LONG"
+                elif ev_short and ev_short.get("hits"):
+                    ev, side = ev_short, "SHORT"
+
+                if not ev or not side or not ev.get("hits"):
                     continue
+
                 nsig += 1
                 name, detail = ev["hits"][0]
                 close, atr = ev["close"], ev["atr"]
@@ -200,7 +232,7 @@ class Engine:
                                  if len(ev["hits"]) > 1 else "")
 
                 def skip(why):
-                    self.add_sig(con, sym, name, side, r.rank, close, sl0, tp0, atr,
+                    self.add_sig(con, sym, name, side, rnk, close, sl0, tp0, atr,
                                  "SKIP", f"{why} | {note}")
                     log.info(f"SKIP {sym} {side} {name}: {why}")
 
@@ -226,14 +258,14 @@ class Engine:
                     continue
 
                 if self.dry:
-                    self.add_sig(con, sym, name, side, r.rank, close, sl0, tp0, atr,
+                    self.add_sig(con, sym, name, side, rnk, close, sl0, tp0, atr,
                                  "DRY", f"spread {spread:.3f}% | {note}")
                     log.info(f"DRY SIGNAL {sym} {side} {name} | {note}")
                     n_open += 1
                     continue
 
                 ok, msg = self.execute(sym, side, atr, name, mid)
-                self.add_sig(con, sym, name, side, r.rank, close, sl0, tp0, atr,
+                self.add_sig(con, sym, name, side, rnk, close, sl0, tp0, atr,
                              "TAKEN" if ok else "FAILED", msg if not ok else note)
                 if ok:
                     taken += 1
@@ -241,7 +273,7 @@ class Engine:
                     open_syms.add(sym)
                 else:
                     log.error(f"FAILED {sym} {side} {name}: {msg}")
-            log.info(f"Cycle done | candle {bdt(exp_open)} | rank {rh} | checked={checked} "
+            log.info(f"Cycle done | candle {bdt(exp_open)} | checked={checked} "
                      f"signals={nsig} taken={taken} open={n_open}")
         finally:
             con.close()

@@ -54,8 +54,8 @@ h4{margin:0;padding:8px 10px;font-size:12px;letter-spacing:.5px;color:var(--mut)
 table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;border-bottom:1px solid #161e29;text-align:left}
 
 /* Detailed terminal panes: compact rows, responsive horizontal scrolling */
-#right, #left{overflow:hidden}
-#tab-watch,#tab-signal,#tab-pos,#ltab-pos,#ltab-health{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+#right{overflow:hidden}
+#tab-watch,#tab-signal,#tab-pos{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
 .terminal-table-wrap{width:100%;overflow-x:auto;scrollbar-width:thin}
 
 /* Watch table: responsive and fluid with sidebar width */
@@ -117,20 +117,13 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <body>
 <div id="app">
   <aside id="left">
-    <div class="tabs" id="ltabs">
-      <button data-lt="health" class="on">Health &amp; Logs</button>
-      <button data-lt="pos">Position</button>
-    </div>
-    <div id="ltab-health">
-      <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
-      <div id="sum">...</div>
-      <div id="hitems"></div>
-      <h4>Errors / Warnings (log)</h4>
-      <div id="errs"></div>
-      <h4>Fix jobs</h4>
-      <div id="jobs" class="note">-</div>
-    </div>
-    <div id="ltab-pos" style="display:none"></div>
+    <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
+    <div id="sum">...</div>
+    <div id="hitems"></div>
+    <h4>Errors / Warnings (log)</h4>
+    <div id="errs"></div>
+    <h4>Fix jobs</h4>
+    <div id="jobs" class="note">-</div>
   </aside>
   <div class="hdl" id="hl" title="Drag = size, Double-click = reset"></div>
 
@@ -737,21 +730,6 @@ document.querySelectorAll('#right .tabs button').forEach(b => b.addEventListener
   });
   if (b.dataset.t !== 'watch') loadSP();
 }));
-
-// ---------- left sidebar
-document.querySelectorAll('#ltabs button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('#ltabs button').forEach(x => x.classList.toggle('on', x === b));
-  const t = b.dataset.lt;
-  const h = document.getElementById('ltab-health');
-  const p = document.getElementById('ltab-pos');
-  if (h) h.style.display = t === 'health' ? '' : 'none';
-  if (p) p.style.display = t === 'pos' ? '' : 'none';
-  localStorage.setItem('left_tab', t);
-  if (t === 'pos') loadSP();
-}));
-const savedLeftTab = localStorage.getItem('left_tab') || 'health';
-const curLeftBtn = document.querySelector(`#ltabs button[data-lt="${savedLeftTab}"]`);
-if (curLeftBtn) curLeftBtn.click();
 // Output encoding prevents external API values from injecting HTML.
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const pick = (obj, ...keys) => {
@@ -890,15 +868,10 @@ async function loadSP() {
     if(!sr.ok||!pr.ok)throw new Error('API unavailable');
     const [s,p]=await Promise.all([sr.json(),pr.json()]);
     $('#tab-signal').innerHTML=renderSignals(s);
-    const posHtml = renderPositions(p);
-    $('#tab-pos').innerHTML=posHtml;
-    const lPos = $('#ltab-pos');
-    if (lPos) lPos.innerHTML=posHtml;
+    $('#tab-pos').innerHTML=renderPositions(p);
   } catch(e) {
     $('#tab-signal').innerHTML='<div class="note">Signal API unavailable</div>';
     $('#tab-pos').innerHTML='<div class="note">Position API unavailable</div>';
-    const lPos = $('#ltab-pos');
-    if (lPos) lPos.innerHTML='<div class="note">Position API unavailable</div>';
   }
 }
 
