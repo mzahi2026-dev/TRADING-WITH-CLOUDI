@@ -54,18 +54,46 @@ h4{margin:0;padding:8px 10px;font-size:12px;letter-spacing:.5px;color:var(--mut)
 table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;border-bottom:1px solid #161e29;text-align:left}
 
 /* Detailed terminal panes: compact rows, responsive horizontal scrolling */
-#right{overflow:hidden}#tab-watch,#tab-signal,#tab-pos{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+#right, #left{overflow:hidden}
+#tab-watch,#tab-signal,#tab-pos,#ltab-pos,#ltab-health{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
 .terminal-table-wrap{width:100%;overflow-x:auto;scrollbar-width:thin}
-.terminal-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:fixed}
+
+/* Watch table: responsive and fluid with sidebar width */
+.watch-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
+.watch-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 5px}
+.watch-table td{padding:5px 5px;white-space:nowrap;color:#cdd8e8;border-bottom:1px solid #1b2937}
+.watch-table th:nth-child(1), .watch-table td:nth-child(1){width:24px;text-align:center}
+.watch-table th:nth-child(2), .watch-table td:nth-child(2){font-weight:700;color:#f0f5fb;min-width:70px}
+.watch-table th:nth-child(3), .watch-table td:nth-child(3){text-align:center;width:42px}
+.watch-table th:nth-child(4), .watch-table td:nth-child(4){text-align:right;min-width:38px}
+.watch-table th:nth-child(5), .watch-table td:nth-child(5){text-align:right;min-width:38px}
+.watch-table th:nth-child(6), .watch-table td:nth-child(6){text-align:right;min-width:52px}
+.watch-table th:nth-child(7), .watch-table td:nth-child(7){text-align:right;min-width:38px}
+.watch-table tbody tr[data-s]{cursor:pointer}.watch-table tbody tr[data-s]:hover{background:#1d3042}.watch-table tbody tr.sel{background:#20334a}
+.watch-table .num{text-align:right}.watch-table td.muted{color:#8195ac}.watch-table .symname{font-weight:700;color:#f0f5fb}
+.watch-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
+.watch-table .detail-row{cursor:default}
+
+/* Position table: fully responsive to sidebar widening / shrinking (barano/komano) */
+.pos-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
+.pos-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 6px}
+.pos-table td{padding:6px 6px;white-space:nowrap;color:#cdd8e8;border-bottom:1px solid #1b2937}
+.pos-table th.col-sym, .pos-table td.col-sym{font-weight:700;color:#f0f5fb;min-width:75px}
+.pos-table th.col-side, .pos-table td.col-side{text-align:center;width:48px}
+.pos-table th.col-entry, .pos-table td.col-entry{text-align:right;min-width:58px}
+.pos-table th.col-mark, .pos-table td.col-mark{text-align:right;min-width:58px}
+.pos-table th.col-sl, .pos-table td.col-sl{text-align:right;min-width:52px}
+.pos-table th.col-tp, .pos-table td.col-tp{text-align:right;min-width:52px}
+.pos-table th.col-pnl, .pos-table td.col-pnl{text-align:right;font-weight:700;min-width:54px}
+.pos-table th.col-status, .pos-table td.col-status{text-align:center;min-width:55px;font-size:10px}
+.pos-table tbody tr[data-pos-index]{cursor:pointer}.pos-table tbody tr[data-pos-index]:hover{background:#1d3042}
+.pos-table .num{text-align:right}
+.pos-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
+.pos-table .detail-row{cursor:default}
+
+.terminal-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
 .terminal-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 4px}
-.terminal-table td{padding:5px 4px;white-space:nowrap;color:#cdd8e8;border-bottom:1px solid #1b2937;overflow:hidden;text-overflow:ellipsis}
-.terminal-table th:nth-child(1), .terminal-table td:nth-child(1){width:24px;text-align:center}
-.terminal-table th:nth-child(2), .terminal-table td:nth-child(2){width:75px}
-.terminal-table th:nth-child(3), .terminal-table td:nth-child(3){width:45px;text-align:center}
-.terminal-table th:nth-child(4), .terminal-table td:nth-child(4){width:42px;text-align:right}
-.terminal-table th:nth-child(5), .terminal-table td:nth-child(5){width:38px;text-align:right}
-.terminal-table th:nth-child(6), .terminal-table td:nth-child(6){width:38px;text-align:right}
-.terminal-table th:nth-child(7), .terminal-table td:nth-child(7){width:38px;text-align:right}
+.terminal-table td{padding:5px 4px;white-space:nowrap;color:#cdd8e8;border-bottom:1px solid #1b2937}
 .terminal-table tbody tr[data-s]{cursor:pointer}.terminal-table tbody tr[data-s]:hover{background:#1d3042}.terminal-table tbody tr.sel{background:#20334a}
 .terminal-table .num{text-align:right}.terminal-table td.muted{color:#8195ac}.terminal-table .symname{font-weight:700;color:#f0f5fb}
 .terminal-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
@@ -89,13 +117,20 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <body>
 <div id="app">
   <aside id="left">
-    <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
-    <div id="sum">...</div>
-    <div id="hitems"></div>
-    <h4>Errors / Warnings (log)</h4>
-    <div id="errs"></div>
-    <h4>Fix jobs</h4>
-    <div id="jobs" class="note">-</div>
+    <div class="tabs" id="ltabs">
+      <button data-lt="health" class="on">Health &amp; Logs</button>
+      <button data-lt="pos">Position</button>
+    </div>
+    <div id="ltab-health">
+      <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
+      <div id="sum">...</div>
+      <div id="hitems"></div>
+      <h4>Errors / Warnings (log)</h4>
+      <div id="errs"></div>
+      <h4>Fix jobs</h4>
+      <div id="jobs" class="note">-</div>
+    </div>
+    <div id="ltab-pos" style="display:none"></div>
   </aside>
   <div class="hdl" id="hl" title="Drag = size, Double-click = reset"></div>
 
@@ -694,11 +729,29 @@ $('#btnAnalysis').addEventListener('click', () => {
 });
 
 // ---------- right sidebar
-document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
-  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
-  ['watch','signal','pos'].forEach(t => document.getElementById('tab-' + t).style.display = t === b.dataset.t ? '' : 'none');
+document.querySelectorAll('#right .tabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#right .tabs button').forEach(x => x.classList.toggle('on', x === b));
+  ['watch','signal','pos'].forEach(t => {
+    const el = document.getElementById('tab-' + t);
+    if (el) el.style.display = t === b.dataset.t ? '' : 'none';
+  });
   if (b.dataset.t !== 'watch') loadSP();
 }));
+
+// ---------- left sidebar
+document.querySelectorAll('#ltabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#ltabs button').forEach(x => x.classList.toggle('on', x === b));
+  const t = b.dataset.lt;
+  const h = document.getElementById('ltab-health');
+  const p = document.getElementById('ltab-pos');
+  if (h) h.style.display = t === 'health' ? '' : 'none';
+  if (p) p.style.display = t === 'pos' ? '' : 'none';
+  localStorage.setItem('left_tab', t);
+  if (t === 'pos') loadSP();
+}));
+const savedLeftTab = localStorage.getItem('left_tab') || 'health';
+const curLeftBtn = document.querySelector(`#ltabs button[data-lt="${savedLeftTab}"]`);
+if (curLeftBtn) curLeftBtn.click();
 // Output encoding prevents external API values from injecting HTML.
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const pick = (obj, ...keys) => {
@@ -743,7 +796,7 @@ const watchCols = [
 let uniLoaded = false, expandedWatch = null;
 function watchTable(rows, kind) {
   if (!rows.length) return '<div class="note">No ranking data</div>';
-  const head = `<div class="terminal-table-wrap"><table class="terminal-table"><thead><tr>${watchCols.map(([label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>`;
+  const head = `<div class="terminal-table-wrap"><table class="watch-table"><thead><tr>${watchCols.map(([label]) => `<th>${esc(label)}</th>`).join('')}</tr></thead><tbody>`;
   const body = rows.map((r,i) => {
     const id = kind + ':' + (r.symbol || '') + ':' + i;
     const opened = id === expandedWatch;
@@ -803,29 +856,33 @@ function renderSignals(data) {
   return `<div class="section-toolbar"><strong>SIGNAL HISTORY</strong><span>${rows.length} signals</span></div><div class="signal-stack">${rows.map(signalCard).join('')}</div>`;
 }
 const positionCols = [
-  ['Symbol',r=>raw(pick(r,'symbol','coin'))],
-  ['Side',r=>`<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
-  ['Entry',r=>{let v=pick(r,'entry_price','entry');return v==null?'—':priceText(v)}],
-  ['Mark/Exit',r=>{let v=pick(r,'mark_price','current_price','exit_price','close_price');return v==null?'—':priceText(v)}],
-  ['SL',r=>{let v=pick(r,'stop_loss','sl');return v==null?'—':priceText(v)}],
-  ['TP',r=>{let v=pick(r,'take_profit','tp');return v==null?'—':priceText(v)}],
-  ['PnL',r=>{let v=pick(r,'unrealized_pnl','net_pnl','realized_pnl','pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${fmt(v,2)}</span>`}],
-  ['Status',r=>raw(pick(r,'status','state','result'))]
+  ['Symbol', 'col-sym', r=>raw(pick(r,'symbol','coin'))],
+  ['Side', 'col-side', r=>`<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
+  ['Entry', 'col-entry', r=>{let v=pick(r,'entry_price','entry');return (v==null||Number(v)<=0)?'—':priceText(v)}],
+  ['Mark/Exit', 'col-mark', r=>{let v=pick(r,'mark_price','current_price','exit_price','close_price');return (v==null||Number(v)<=0)?'—':priceText(v)}],
+  ['SL', 'col-sl', r=>{let v=pick(r,'stop_loss','sl');return (v==null||Number(v)<=0)?'—':priceText(v)}],
+  ['TP', 'col-tp', r=>{let v=pick(r,'take_profit','tp');return (v==null||Number(v)<=0)?'—':priceText(v)}],
+  ['PnL', 'col-pnl', r=>{let v=pick(r,'unrealized_pnl','net_pnl','realized_pnl','pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${fmt(v,2)}</span>`}],
+  ['Status', 'col-status', r=>raw(pick(r,'status','state','result'))]
 ];
 function renderPositions(data) {
   const rows = Array.isArray(data.rows) ? data.rows : [];
   if(!rows.length) return `<div class="note">${raw(data.note || 'No positions')}</div>`;
-  const headers = positionCols.map(([label])=>`<th>${esc(label)}</th>`).join('');
+  const headers = positionCols.map(([label, cls])=>`<th class="${cls}">${esc(label)}</th>`).join('');
   const body = rows.map((r,i)=>{
-    const values = positionCols.map(([label,get])=>`<td class="${['Entry','Mark/Exit','SL','TP','PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
-    return `<tr data-pos-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" id="position-detail-${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+    const values = positionCols.map(([label, cls, get])=>`<td class="${cls} ${['Entry','Mark/Exit','SL','TP','PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
+    return `<tr data-pos-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" data-detail-index="${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
   }).join('');
-  return `<div class="section-toolbar"><strong>POSITIONS / HISTORY</strong><span>${rows.length} records</span></div><div class="terminal-table-wrap"><table class="terminal-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
+  return `<div class="section-toolbar"><strong>POSITIONS / HISTORY</strong><span>${rows.length} records</span></div><div class="terminal-table-wrap"><table class="pos-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
-$('#tab-pos').addEventListener('click',e=>{
-  const row=e.target.closest('tr[data-pos-index]'); if(!row)return;
-  const detail=document.getElementById('position-detail-'+row.dataset.posIndex);
-  if(detail)detail.style.display=detail.style.display==='none'?'':'none';
+document.addEventListener('click', e => {
+  const row = e.target.closest('tr[data-pos-index]');
+  if (!row) return;
+  const idx = row.dataset.posIndex;
+  const parent = row.closest('table');
+  if (!parent) return;
+  const detail = parent.querySelector(`tr.detail-row[data-detail-index="${idx}"]`);
+  if (detail) detail.style.display = detail.style.display === 'none' ? '' : 'none';
 });
 async function loadSP() {
   try {
@@ -833,10 +890,15 @@ async function loadSP() {
     if(!sr.ok||!pr.ok)throw new Error('API unavailable');
     const [s,p]=await Promise.all([sr.json(),pr.json()]);
     $('#tab-signal').innerHTML=renderSignals(s);
-    $('#tab-pos').innerHTML=renderPositions(p);
+    const posHtml = renderPositions(p);
+    $('#tab-pos').innerHTML=posHtml;
+    const lPos = $('#ltab-pos');
+    if (lPos) lPos.innerHTML=posHtml;
   } catch(e) {
     $('#tab-signal').innerHTML='<div class="note">Signal API unavailable</div>';
     $('#tab-pos').innerHTML='<div class="note">Position API unavailable</div>';
+    const lPos = $('#ltab-pos');
+    if (lPos) lPos.innerHTML='<div class="note">Position API unavailable</div>';
   }
 }
 
@@ -865,10 +927,11 @@ $('#btnTest').onclick = () => { $('#sum').textContent = 'checking...'; health();
 
 // ---------- init
 $('#sym').value = sym;
-buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch();
+buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch(); loadSP();
 requestAnimationFrame(loop);
 setInterval(health, 15000);
 setInterval(loadWatch, 60000);
+setInterval(loadSP, 15000);
 </script>
 </body>
 </html>

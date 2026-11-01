@@ -429,12 +429,12 @@ class Engine:
                 if status == "EMERGENCY_UNPROTECTED":
                     cs = "SELL" if side == "LONG" else "BUY"
                     log.warning(f"Reconcile handling EMERGENCY_UNPROTECTED position for {sym}...")
-                    if self.try_cond(sym, cs, "STOP_MARKET", sl):
+                    if sl > 0 and self.try_cond(sym, cs, "STOP_MARKET", sl):
                         con.execute("UPDATE positions SET status='OPEN' WHERE id=?", (pid,))
                         con.commit()
                         log.info(f"{sym}: Successfully protected emergency position with SL {sl}")
                     else:
-                        log.critical(f"{sym}: Reconcile could not set SL, trying emergency close...")
+                        log.critical(f"{sym}: sl <= 0 or cond order failed, trying emergency close...")
                         if self.emergency_close(sym, side, cur_amt):
                             self.close_row(con, pid, sym, side, entry, sl, tp, ems)
         finally:

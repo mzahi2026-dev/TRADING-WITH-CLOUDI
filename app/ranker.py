@@ -232,8 +232,17 @@ def run_rank(wait=True):
             skipped += 1
             log.warning(f"Rank {sym}: {e}")
 
-    mism = [r for r in results if r["aligned"] <= 0]     # 1h daily er biporite = bad
-    results = [r for r in results if r["aligned"] > 0]
+    aligned_matches = [r for r in results if r["aligned"] > 0]
+    if len(aligned_matches) >= 5:
+        results = aligned_matches
+    else:
+        # If market is consolidating/pulling back, include top rank_scores from watchlist
+        # so Hourly Top always provides actionable coins for the trader to evaluate
+        aligned_set = {r["symbol"] for r in aligned_matches}
+        remaining = [r for r in results if r["symbol"] not in aligned_set]
+        remaining.sort(key=lambda r: r["rank_score"], reverse=True)
+        results = aligned_matches + remaining[:(config.RANK_TOP_N - len(aligned_matches))]
+
     results.sort(key=lambda r: r["rank_score"], reverse=True)
     results = results[:config.RANK_TOP_N]
 
