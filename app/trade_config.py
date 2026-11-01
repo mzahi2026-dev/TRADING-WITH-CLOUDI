@@ -3,8 +3,8 @@ DEMO_BASE = "https://demo-fapi.binance.com"   # shudhu demo, real account e orde
 NOTIONAL_USDT = 100.0       # proti trade er size
 LEVERAGE = 5
 MAX_OPEN = 5
-SL_ATR = 0.8
-TP_ATR = 1.6
+SL_ATR = 1.5
+TP_ATR = 3.0
 
 # Risk Limits
 MAX_DAILY_LOSS_USDT = 150.0    # 24h net loss exceeded -> stop new trades (circuit breaker)
