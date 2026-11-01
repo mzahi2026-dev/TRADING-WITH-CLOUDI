@@ -62,6 +62,11 @@ def ser(t, v):
     return out
 
 
+@app.get("/ping")
+def ping():
+    return {"status": "alive", "server_time": int(time.time() * 1000)}
+
+
 @app.get("/")
 def index(request: Request, response: Response):
     token = request.query_params.get("token")
