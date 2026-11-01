@@ -329,6 +329,107 @@ def positions():
     return {"rows": clean(df), "note": ""}
 
 
+@app.get("/api/journal")
+def journal_summary():
+    con = db()
+    if not has_table(con, "positions"):
+        con.close()
+        return {
+            "summary": {
+                "balance": 0.0, "available": 0.0, "today_pnl": 0.0, "today_trades": 0,
+                "active_positions": 0, "tp_count": 0, "tp_usdt": 0.0, "sl_count": 0, "sl_usdt": 0.0,
+            },
+            "days": [],
+            "trades_by_day": {}
+        }
+
+    av_bal, tot_bal = 0.0, 0.0
+    try:
+        from app.demo_client import DemoClient
+        dc = DemoClient()
+        av_bal, tot_bal = dc.balance()
+    except Exception as e:
+        log.warning(f"Journal balance check: {e}")
+
+    BDT = timezone(timedelta(hours=6))
+    now_dt = datetime.now(BDT)
+    today_start = datetime(now_dt.year, now_dt.month, now_dt.day, tzinfo=BDT)
+    today_start_ms = int(today_start.timestamp() * 1000)
+    seven_days_ago_ms = today_start_ms - 6 * 86400 * 1000
+
+    df = pd.read_sql_query(
+        "SELECT * FROM positions WHERE entry_ms>=? ORDER BY rowid DESC",
+        con, params=(seven_days_ago_ms,)
+    )
+    if df.empty:
+        df = pd.read_sql_query("SELECT * FROM positions ORDER BY rowid DESC LIMIT 100", con)
+    con.close()
+
+    def get_date_str(row):
+        ems = row.get("entry_ms")
+        if ems and not pd.isna(ems) and ems > 0:
+            return datetime.fromtimestamp(ems / 1000, tz=BDT).strftime("%Y-%m-%d")
+        t = str(row.get("time") or "")
+        if len(t) >= 5 and "-" in t:
+            return f"{now_dt.year}-{t[:5]}"
+        return now_dt.strftime("%Y-%m-%d")
+
+    if not df.empty:
+        df["date_str"] = df.apply(get_date_str, axis=1)
+    else:
+        df["date_str"] = []
+
+    today_str = now_dt.strftime("%Y-%m-%d")
+    active_mask = df["status"].str.upper().isin(["OPEN", "EMERGENCY_UNPROTECTED"]) if not df.empty else pd.Series([], dtype=bool)
+    active_count = int(active_mask.sum()) if not df.empty else 0
+
+    today_mask = (df["date_str"] == today_str) if not df.empty else pd.Series([], dtype=bool)
+    today_trades = int(today_mask.sum()) if not df.empty else 0
+
+    today_closed = df[today_mask & (df["status"].str.upper() == "CLOSED")] if not df.empty else pd.DataFrame()
+    today_pnl = float(today_closed["pnl"].sum()) if not today_closed.empty else 0.0
+
+    tp_closed = today_closed[today_closed["result"].str.upper() == "TP"] if not today_closed.empty else pd.DataFrame()
+    tp_count = len(tp_closed)
+    tp_usdt = float(tp_closed["pnl"].sum()) if not tp_closed.empty else 0.0
+
+    sl_closed = today_closed[today_closed["result"].str.upper() == "SL"] if not today_closed.empty else pd.DataFrame()
+    sl_count = len(sl_closed)
+    sl_usdt = float(sl_closed["pnl"].sum()) if not sl_closed.empty else 0.0
+
+    days_list = []
+    trades_by_day = {}
+    for i in range(7):
+        d = now_dt - timedelta(days=i)
+        ds = d.strftime("%Y-%m-%d")
+        lbl = "Today" if i == 0 else ("Yesterday" if i == 1 else d.strftime("%a, %d %b"))
+        day_trades_df = df[df["date_str"] == ds] if not df.empty else pd.DataFrame()
+        day_pnl = float(day_trades_df["pnl"].sum()) if not day_trades_df.empty else 0.0
+        days_list.append({
+            "date": ds,
+            "label": f"{lbl} ({d.strftime('%d %b')})",
+            "trades_count": len(day_trades_df),
+            "pnl": round(day_pnl, 2)
+        })
+        trades_by_day[ds] = clean(day_trades_df) if not day_trades_df.empty else []
+
+    return {
+        "summary": {
+            "balance": round(tot_bal, 2),
+            "available": round(av_bal, 2),
+            "today_pnl": round(today_pnl, 2),
+            "today_trades": today_trades,
+            "active_positions": active_count,
+            "tp_count": tp_count,
+            "tp_usdt": round(tp_usdt, 2),
+            "sl_count": sl_count,
+            "sl_usdt": round(sl_usdt, 2),
+        },
+        "days": days_list,
+        "trades_by_day": trades_by_day
+    }
+
+
 # ------------------------------------------------------------------ health
 def tail_issues(name, keep=6):
     p = config.LOG_DIR / name

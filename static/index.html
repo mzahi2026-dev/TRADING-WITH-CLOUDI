@@ -62,6 +62,26 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 .pos-split-open .terminal-table-wrap, .pos-split-history .terminal-table-wrap{flex:1;overflow:auto;scrollbar-width:thin}
 .terminal-table-wrap{width:100%;overflow-x:auto;scrollbar-width:thin}
 
+/* Left sidebar Journal: 30% Summary Card, 70% 7-day Journal Table */
+#left{overflow:hidden}
+#ltab-health{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+#ltab-journal{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden;height:100%}
+.journal-split-summary{height:30%;min-height:175px;display:flex;flex-direction:column;overflow:hidden;border-bottom:2px solid #1c2736;background:#0d131a}
+.journal-split-history{height:70%;display:flex;flex-direction:column;overflow:hidden;flex:1;background:#0f1621}
+.journal-split-summary .sum-wrap{flex:1;overflow:auto;scrollbar-width:thin;padding:8px}
+.journal-split-history .table-wrap{flex:1;overflow:auto;scrollbar-width:thin}
+
+.jcard-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.jcard{background:#141d28;border:1px solid #1f2c3d;border-radius:5px;padding:6px 8px}
+.jcard.full{grid-column:1 / -1}
+.jcard small{display:block;font-size:10px;color:#8595a8;text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
+.jcard .val{font-size:13px;font-weight:700;color:#f0f5fb;font-variant-numeric:tabular-nums}
+.jcard .sub{font-size:10px;color:#8595a8;margin-top:2px}
+
+.jbar{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:6px 9px;background:#141f2d;border-bottom:1px solid #202f42}
+.jbar strong{font-size:11px;color:#e7f0fb;letter-spacing:.3px}
+.jselect{background:#0c121a;border:1px solid #26384c;color:#cbd5e1;font-size:11px;padding:3px 6px;border-radius:4px;outline:none;max-width:170px}
+
 /* Watch table: responsive and fluid with sidebar width */
 .watch-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
 .watch-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 5px}
@@ -121,13 +141,32 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 <body>
 <div id="app">
   <aside id="left">
-    <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
-    <div id="sum">...</div>
-    <div id="hitems"></div>
-    <h4>Errors / Warnings (log)</h4>
-    <div id="errs"></div>
-    <h4>Fix jobs</h4>
-    <div id="jobs" class="note">-</div>
+    <div class="tabs" id="ltabs">
+      <button data-lt="health" class="on">Engine Health</button>
+      <button data-lt="journal">Trading Journal</button>
+    </div>
+    <div id="ltab-health">
+      <h4>Engine Health <span><button id="btnTest">Test</button></span></h4>
+      <div id="sum">...</div>
+      <div id="hitems"></div>
+      <h4>Errors / Warnings (log)</h4>
+      <div id="errs"></div>
+      <h4>Fix jobs</h4>
+      <div id="jobs" class="note">-</div>
+    </div>
+    <div id="ltab-journal" style="display:none">
+      <div class="journal-split-summary" id="journalSummary">
+        <div class="section-toolbar"><strong>📊 DAILY SUMMARY CARD</strong><span style="color:#4aa3ff">30% Height</span></div>
+        <div class="sum-wrap" id="jSummaryWrap">Loading summary...</div>
+      </div>
+      <div class="journal-split-history" id="journalHistory">
+        <div class="jbar">
+          <strong>📜 7-DAY JOURNAL</strong>
+          <select id="jday" class="jselect"></select>
+        </div>
+        <div class="table-wrap" id="jTableWrap">Loading journal...</div>
+      </div>
+    </div>
   </aside>
   <div class="hdl" id="hl" title="Drag = size, Double-click = reset"></div>
 
@@ -734,6 +773,22 @@ document.querySelectorAll('#right .tabs button').forEach(b => b.addEventListener
   });
   if (b.dataset.t !== 'watch') loadSP();
 }));
+
+// ---------- left sidebar tabs
+let journalData = null;
+document.querySelectorAll('#ltabs button').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('#ltabs button').forEach(x => x.classList.toggle('on', x === b));
+  const t = b.dataset.lt;
+  const h = document.getElementById('ltab-health');
+  const j = document.getElementById('ltab-journal');
+  if (h) h.style.display = t === 'health' ? '' : 'none';
+  if (j) j.style.display = t === 'journal' ? 'flex' : 'none';
+  localStorage.setItem('left_tab_pref', t);
+  if (t === 'journal') loadJournal();
+}));
+const savedLTab = localStorage.getItem('left_tab_pref') || 'health';
+const curLBtn = document.querySelector(`#ltabs button[data-lt="${savedLTab}"]`);
+if (curLBtn) curLBtn.click();
 // Output encoding prevents external API values from injecting HTML.
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 const pick = (obj, ...keys) => {
@@ -915,6 +970,111 @@ async function loadSP() {
   }
 }
 
+// ---------- left sidebar: journal & summary
+async function loadJournal() {
+  try {
+    const res = await fetch('/api/journal');
+    if (!res.ok) throw new Error('API failed');
+    journalData = await res.json();
+    renderJournalSummary(journalData.summary);
+    populateJournalDropdown(journalData.days);
+    const selDay = $('#jday').value || (journalData.days[0] && journalData.days[0].date);
+    renderJournalTableForDay(selDay);
+  } catch(e) {
+    $('#jSummaryWrap').innerHTML = `<div class="note">Journal unavailable: ${esc(e.message)}</div>`;
+  }
+}
+
+function renderJournalSummary(s) {
+  if (!s) return;
+  const pnlSign = Number(s.today_pnl) >= 0 ? '+' : '';
+  const pnlClass = Number(s.today_pnl) >= 0 ? 'positive' : 'negative';
+  $('#jSummaryWrap').innerHTML = `
+    <div class="jcard-grid">
+      <div class="jcard full">
+        <small>💳 DEMO WALLET BALANCE</small>
+        <div class="val">$${Number(s.balance).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size:11px;font-weight:400;color:#94a7bd">USDT</span></div>
+        <div class="sub">Available: $${Number(s.available).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} USDT</div>
+      </div>
+      <div class="jcard">
+        <small>📈 TODAY NET PNL</small>
+        <div class="val ${pnlClass}">${pnlSign}$${Number(s.today_pnl).toFixed(2)}</div>
+        <div class="sub">${Number(s.today_pnl) >= 0 ? '🟢 In Profit' : '🛑 Drawdown'}</div>
+      </div>
+      <div class="jcard">
+        <small>📊 TRADES TODAY</small>
+        <div class="val">${s.today_trades} <span style="font-size:11px;font-weight:400;color:#94a7bd">Opened</span></div>
+        <div class="sub">🟢 <b>${s.active_positions}</b> Active Now</div>
+      </div>
+      <div class="jcard">
+        <small>🎯 TP HIT</small>
+        <div class="val positive">${s.tp_count} <span style="font-size:11px;font-weight:400;color:#94a7bd">hit</span></div>
+        <div class="sub positive">+$${Number(s.tp_usdt).toFixed(2)} USDT</div>
+      </div>
+      <div class="jcard">
+        <small>🛑 SL HIT</small>
+        <div class="val negative">${s.sl_count} <span style="font-size:11px;font-weight:400;color:#94a7bd">hit</span></div>
+        <div class="sub negative">${Number(s.sl_usdt) < 0 ? '-' : ''}$${Math.abs(Number(s.sl_usdt)).toFixed(2)} USDT</div>
+      </div>
+    </div>
+  `;
+}
+
+function populateJournalDropdown(days) {
+  if (!days || !days.length) return;
+  const sel = $('#jday');
+  const cur = sel.value;
+  sel.innerHTML = days.map(d => {
+    const pnlTxt = d.trades_count > 0 ? ` (${d.trades_count} trd, ${d.pnl>=0?'+':''}$${d.pnl})` : ' (0 trades)';
+    return `<option value="${esc(d.date)}">${esc(d.label)}${pnlTxt}</option>`;
+  }).join('');
+  if (cur && days.some(d => d.date === cur)) sel.value = cur;
+}
+
+$('#jday').addEventListener('change', e => {
+  renderJournalTableForDay(e.target.value);
+});
+
+function renderJournalTableForDay(dateStr) {
+  if (!journalData || !journalData.trades_by_day) return;
+  const rows = journalData.trades_by_day[dateStr] || [];
+  if (!rows.length) {
+    $('#jTableWrap').innerHTML = `<div class="note" style="padding:15px">No trades recorded on ${esc(dateStr)}</div>`;
+    return;
+  }
+  const jcols = [
+    ['Time', 'col-sym', r => `<span style="font-size:10px;color:#8595a8">${raw(r.time)}</span>`],
+    ['Symbol', 'col-sym', r => `<span class="symname">${raw(r.symbol)}</span>`],
+    ['Side', 'col-side', r => `<span class="${directional(r.side)}">${raw(r.side)}</span>`],
+    ['Strategy', 'col-sym', r => `<span style="font-size:10px">${raw(r.strategy)}</span>`],
+    ['Entry', 'col-entry', r => priceText(r.entry)],
+    ['Exit', 'col-mark', r => (r.exit == null || Number(r.exit)<=0) ? '—' : priceText(r.exit)],
+    ['PnL', 'col-pnl', r => (r.pnl == null) ? '—' : `<span class="${Number(r.pnl)>=0?'positive':'negative'}">${Number(r.pnl)>=0?'+':''}${fmt(r.pnl,2)}</span>`],
+    ['Result', 'col-status', r => `<span class="tag ${directional(r.side)}">${raw(r.result || r.status)}</span>`]
+  ];
+  const headers = jcols.map(([lbl, cls]) => `<th class="${cls}">${esc(lbl)}</th>`).join('');
+  const body = rows.map((r, i) => {
+    const values = jcols.map(([lbl, cls, fn]) => `<td class="${cls} ${['Entry','Exit','PnL'].includes(lbl)?'num':''}">${fn(r)}</td>`).join('');
+    return `<tr data-j-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" id="j-detail-${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+  }).join('');
+  $('#jTableWrap').innerHTML = `
+    <div class="terminal-table-wrap">
+      <table class="pos-table">
+        <thead><tr>${headers}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+document.addEventListener('click', e => {
+  const row = e.target.closest('tr[data-j-index]');
+  if (!row) return;
+  const idx = row.dataset.jIndex;
+  const det = document.getElementById('j-detail-' + idx);
+  if (det) det.style.display = det.style.display === 'none' ? '' : 'none';
+});
+
 // ---------- left sidebar: health
 const LBL = {ok:'OK', warn:'WARN', bad:'PROBLEM', idle:'IDLE'};
 async function health() {
@@ -940,11 +1100,12 @@ $('#btnTest').onclick = () => { $('#sum').textContent = 'checking...'; health();
 
 // ---------- init
 $('#sym').value = sym;
-buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch(); loadSP();
+buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch(); loadSP(); loadJournal();
 requestAnimationFrame(loop);
 setInterval(health, 15000);
 setInterval(loadWatch, 60000);
 setInterval(loadSP, 15000);
+setInterval(loadJournal, 30000);
 </script>
 </body>
 </html>
