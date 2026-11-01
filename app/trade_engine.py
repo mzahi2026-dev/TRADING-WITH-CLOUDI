@@ -349,25 +349,26 @@ class Engine:
             log.warning(f"{sym}: TP boshe ni, shudhu SL ache")
 
         con = self.db()
-        con.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
+        cur = con.cursor()
+        cur.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
                     "VALUES (?,?,?,?,?,?,?,?,'OPEN',?)",
                     (bdt(), sym, name, side, entry, sl, tp, amt, t_before))
+        pos_id = cur.lastrowid
         con.commit()
         con.close()
         log.info(f"OPENED {sym} {side} {name} | entry {entry} SL {sl} TP {tp} qty {amt}"
                  f"{'' if tp_ok else ' (TP missing)'}")
         try:
-            from .notifier import send_alert
-            send_alert(
-                f"🚀 <b>TRADE OPENED</b>\n\n"
-                f"• <b>Symbol:</b> {sym} ({side})\n"
-                f"• <b>Strategy:</b> {name}\n"
-                f"• <b>Entry:</b> {entry}\n"
-                f"• <b>Qty:</b> {amt}\n"
-                f"• <b>Stop Loss (SL):</b> {sl}\n"
-                f"• <b>Take Profit (TP):</b> {tp}\n"
-                f"• <b>Mode:</b> {'DRY RUN' if self.dry else 'BINANCE DEMO FUTURES'}",
-                parse_mode="HTML"
+            from .notifier import send_trade_opened_alert
+            send_trade_opened_alert(
+                pid=pos_id,
+                sym=sym,
+                side=side,
+                strat=name,
+                entry=entry,
+                sl=sl,
+                tp=tp,
+                dry=self.dry
             )
         except Exception as te:
             log.warning(f"Telegram alert error on open: {te}")
@@ -474,18 +475,17 @@ class Engine:
         con.commit()
         log.info(f"CLOSED {sym} {side} {res} | exit {ex:.6g} | net {net:+.4f} USDT (fee {fee:.4f})")
         try:
-            from .notifier import send_alert
-            pnl_icon = "💰" if net > 0 else "🛑"
-            send_alert(
-                f"{pnl_icon} <b>TRADE CLOSED ({res})</b>\n\n"
-                f"• <b>Symbol:</b> {sym} ({side})\n"
-                f"• <b>Result:</b> {res}\n"
-                f"• <b>Entry:</b> {entry}\n"
-                f"• <b>Exit:</b> {ex:.6g}\n"
-                f"• <b>Net PnL:</b> {net:+.4f} USDT\n"
-                f"• <b>Fee:</b> {fee:.4f} USDT\n"
-                f"• <b>Mode:</b> {'DRY RUN' if self.dry else 'BINANCE DEMO FUTURES'}",
-                parse_mode="HTML"
+            from .notifier import send_trade_closed_alert
+            send_trade_closed_alert(
+                pid=pid,
+                sym=sym,
+                side=side,
+                res=res,
+                entry=entry,
+                ex=ex,
+                net=net,
+                fee=fee,
+                dry=self.dry
             )
         except Exception as te:
             log.warning(f"Telegram alert error on close: {te}")

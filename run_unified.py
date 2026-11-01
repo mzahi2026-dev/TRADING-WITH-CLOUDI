@@ -235,7 +235,11 @@ def main():
     print(" [✓] Telegram Alerts      : CONFIGURED (Notifies on drop/stale)")
     print("=" * 65)
 
-    send_alert("🚀 *Trading System Started*\n• Mode: `DRY RUN (Safe)`\n• Watchdog: `Active`\n• Dashboard: `http://localhost:8080`")
+    try:
+        from app.notifier import send_bot_online_alert
+        send_bot_online_alert(mode="DEMO" if config.USE_DEMO else "LIVE")
+    except Exception as se:
+        clog.warning(f"Telegram startup alert error: {se}")
 
     # 1. Start Collector (Auto-Recovering)
     print("[1/4] Starting Live WebSocket Data Collector...")
