@@ -10,7 +10,7 @@ TP_ATR = 1.6
 MAX_DAILY_LOSS_USDT = 150.0    # 24h net loss exceeded -> stop new trades (circuit breaker)
 MIN_AVAILABLE_BALANCE = 50.0   # minimum available balance required to open new trade
 
-MIN_VOL_24H = 30_000_000
+MIN_VOL_24H = 15_000_000        # Unified $15M 24h volume threshold across scanner and trader
 MAX_SPREAD_PCT = 0.05       # order book spread %
 MAX_FUNDING = 0.001         # 0.1% er beshi funding hole skip
 MAX_CHASE_ATR = 0.5         # signal close theke price 0.5 ATR er beshi soreche hole skip

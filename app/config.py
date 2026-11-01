@@ -30,7 +30,7 @@ INTERVAL_MS = {
 HISTORY_LIMIT = 1500
 
 # ---- Symbol filter (mandatory) ----
-MIN_QUOTE_VOLUME_24H = 10_000_000
+MIN_QUOTE_VOLUME_24H = 15_000_000  # Unified $15M 24h volume threshold
 MIN_LISTING_AGE_DAYS = 30
 TOP_N = 150
 BLACKLIST = []

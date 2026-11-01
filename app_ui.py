@@ -287,8 +287,13 @@ def watch():
         sd = con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
         out["scan_date"] = sd
         if sd:
-            df = pd.read_sql_query("SELECT symbol, rank, side, score, trend, volume, oi, close FROM watchlist "
-                                   "WHERE scan_date=? ORDER BY rank", con, params=(sd,))
+            df = pd.read_sql_query(
+                "SELECT w.symbol, w.rank, w.side, w.score, w.trend, w.volume, w.oi, w.close, "
+                "COALESCE(u.quote_volume_24h, 0.0) AS quote_vol_24h "
+                "FROM watchlist w LEFT JOIN universe u ON w.symbol = u.symbol "
+                "WHERE w.scan_date=? ORDER BY w.rank",
+                con, params=(sd,)
+            )
             out["watch"] = clean(df)
     if has_table(con, "ranking"):
         rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0]

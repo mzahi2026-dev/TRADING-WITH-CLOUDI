@@ -724,13 +724,20 @@ const extraDetails = (obj, ignored=[]) => {
   if (!keys.length) return '<span class="dim">Additional details not returned by API.</span>';
   return `<div class="details-grid">${keys.map(k => `<div><span class="k">${esc(humanKey(k))}:</span> <span class="v">${raw(typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : obj[k])}</span></div>`).join('')}</div>`;
 };
+function fmtVol(v) {
+  if (v == null || isNaN(v) || v <= 0) return '-';
+  if (v >= 1e9) return '$' + (v / 1e9).toFixed(1) + 'B';
+  if (v >= 1e6) return '$' + (v / 1e6).toFixed(1) + 'M';
+  if (v >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
+  return '$' + Number(v).toFixed(0);
+}
 const watchCols = [
   ['#',r => raw(r.rank)],
   ['Symbol',r => `<span class="symname">${raw(r.symbol)}</span>`],
   ['Side',r => `<span class="${directional(r.side)}">${raw(r.side)}</span>`],
   ['Score',r => fmt(pick(r,'rank_score','score'),1)],
   ['Trend',r => fmt(pick(r,'trend','trend_score','trend_pts'),1)],
-  ['Volume',r => fmt(pick(r,'volume','volume_score','vol_score','vol_ratio','volume_pts'),1)],
+  ['24h Vol',r => fmtVol(pick(r,'quote_vol_24h','quote_volume_24h','volume_24h'))],
   ['OI',r => fmt(pick(r,'oi','oi_score','open_interest_score','oi_pts'),1)]
 ];
 let uniLoaded = false, expandedWatch = null;
@@ -740,7 +747,7 @@ function watchTable(rows, kind) {
   const body = rows.map((r,i) => {
     const id = kind + ':' + (r.symbol || '') + ':' + i;
     const opened = id === expandedWatch;
-    const cells = watchCols.map(([label, get]) => `<td class="${['#','Score','Trend','Volume','OI'].includes(label)?'num':''}">${get(r)}</td>`).join('');
+    const cells = watchCols.map(([label, get]) => `<td class="${['#','Score','Trend','24h Vol','Volume','OI'].includes(label)?'num':''}">${get(r)}</td>`).join('');
     const detail = opened ? `<tr class="detail-row"><td colspan="7"><strong>Why this rank?</strong><div style="margin:5px 0;color:#91a9c4">Ranking uses multiple scored factors; the actual API fields are shown below.</div>${extraDetails(r,['symbol','rank','side','rank_score','score','trend_score','trend','trend_pts','volume_score','vol_score','volume_pts','oi_score','open_interest_score','oi_pts'])}</td></tr>` : '';
     return `<tr class="${r.symbol === sym?'sel':''}" data-s="${esc(r.symbol)}" data-watch-id="${esc(id)}" title="Click to select and expand">${cells}</tr>${detail}`;
   }).join('');
