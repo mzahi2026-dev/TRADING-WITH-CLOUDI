@@ -208,6 +208,13 @@ async def run():
             log.info("Initial history download shuru (kichu minute lagbe)...")
             await asyncio.to_thread(backfill_symbols, client, storage, symbols)
             log.info("Kline history done. Extra data jobs shuru (OI, funding, L/S, taker)...")
+            try:
+                from .scanner import run_scan
+                from .ranker import run_rank
+                asyncio.create_task(asyncio.to_thread(run_scan, False))
+                asyncio.create_task(asyncio.to_thread(run_rank, False))
+            except Exception as se:
+                log.warning(f"Auto scan/rank trigger error: {se}")
 
             extra_tasks = start_extra(client, storage, lambda: symbols)
             gap_task = asyncio.create_task(gapfill_loop(client, storage, lambda: symbols))
