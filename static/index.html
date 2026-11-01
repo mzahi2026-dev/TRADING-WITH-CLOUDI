@@ -321,7 +321,7 @@ function connectWS() {
   if (ws) { ws.onclose = null; try { ws.close(); } catch(e) {} }
   wsOpen = false; setLive();
   const s = sym, t = tf;
-  try { ws = new WebSocket(`wss://fstream.binance.com/ws/${s.toLowerCase()}@kline_${t}`); } catch(e) { return; }
+  try { ws = new WebSocket(`wss://demo-fstream.binance.com/ws/${s.toLowerCase()}@kline_${t}`); } catch(e) { return; }
   ws.onopen = () => { wsOpen = true; setLive(); };
   ws.onmessage = ev => {
     if (s !== sym || t !== tf || loadedCandleKey !== s + ':' + t) return;
