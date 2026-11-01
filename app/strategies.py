@@ -33,44 +33,66 @@ def _view(d, side):
 
 
 def s_breakout(v, atr, volr, tb):
+    """Pure Breakout & Retest Strategy:
+    1. Retest of previously broken horizontal resistance/support level.
+    2. Direct strong high-volume breakout of 20-candle high.
+    """
     i = len(v["c"]) - 1
-    c, o = v["c"][i], v["o"][i]
-    if not v["e20"][i] > v["e50"][i]:
+    c, o, h, l = v["c"][i], v["o"][i], v["h"][i], v["l"][i]
+    if not (v["e20"][i] > v["e50"][i]):
         return None
+
+    # Setup A: Breakout Retest (Previous resistance broken and tested as support)
+    lvl = v["h"][i - 30:i - 3].max()
+    prior_break = (v["c"][i - 6:i] > lvl).any()
+    retest_touch = l <= lvl + 0.3 * atr
+    retest_hold = c >= lvl - 0.15 * atr
+    if prior_break and retest_touch and retest_hold and (c >= o or (c - l) >= 0.4 * max(h - l, 1e-9)):
+        return "breakout_retest", f"Retest of {abs(lvl):.6g}, vol x{volr:.1f}"
+
+    # Setup B: Direct Strong Breakout above 20-candle high with volume expansion
     level = v["h"][i - 20:i].max()
-    if (c > level and c > o and c > v["e20"][i] and volr >= 1.5 and tb >= 0.52
-            and (c - level) <= 1.5 * atr):
-        return "breakout_retest", f"20-candle breakout, vol x{volr:.1f}, buy {tb:.2f}"
-    lvl = v["h"][i - 30:i - 8].max()
-    if ((v["c"][i - 8:i] > lvl).any() and v["l"][i] <= lvl + 0.3 * atr
-            and c > lvl and c > o and c > v["e20"][i] and tb >= 0.5):
-        return "breakout_retest", f"retest of {abs(lvl):.6g}, buy {tb:.2f}"
+    if c > level and c > o and volr >= 1.2 and (c - level) <= 2.0 * atr:
+        return "breakout_retest", f"Breakout above {abs(level):.6g}, vol x{volr:.1f}"
+
     return None
 
 
 def s_pullback(v, atr, volr, tb):
+    """Pure EMA Pullback Strategy:
+    1. Trend confirmation: EMA20 > EMA50.
+    2. Pullback: Price dips into/near EMA20 within last 3 candles.
+    3. Bounce: Current candle holds EMA20 and confirms rejection.
+    4. Healthy RSI trend zone (35-70).
+    """
     i = len(v["c"]) - 1
     c, o, h, l = v["c"], v["o"], v["h"], v["l"]
     e20, e50 = v["e20"], v["e50"]
-    if not (e20[i] > e50[i] and e20[i] > e20[i - 5] and c[i] > e20[i] and c[i] > o[i]):
+
+    # 1. Trend alignment
+    if not (e20[i] > e50[i]):
         return None
-    if not (l[i - 2:i + 1] <= e20[i - 2:i + 1] + 0.2 * atr).any():
+
+    # 2. Pullback touch: in last 3 candles, price touched/tested EMA20
+    touched_ema = (l[i - 2:i + 1] <= e20[i - 2:i + 1] + 0.25 * atr).any()
+    if not touched_ema:
         return None
-    if not (40 <= v["rsi"][i] <= 65):
+
+    # 3. Bounce: current candle holds above EMA20 and shows bullish rejection
+    bounced = c[i] >= e20[i] - 0.1 * atr
+    bullish_rejection = (c[i] > o[i]) or ((c[i] - l[i]) >= 0.45 * max(h[i] - l[i], 1e-9))
+    if not (bounced and bullish_rejection):
         return None
-    body = c[i] - o[i]
-    lower = min(o[i], c[i]) - l[i]
-    rng = max(h[i] - l[i], 1e-12)
-    hammer = lower >= 1.2 * body and lower >= 0.4 * rng
-    engulf = c[i - 1] < o[i - 1] and c[i] >= o[i - 1] and o[i] <= c[i - 1]
-    if hammer:
-        return "ema_pullback", f"EMA20 pullback + hammer, RSI {v['rsi'][i]:.0f}"
-    if engulf:
-        return "ema_pullback", f"EMA20 pullback + engulfing, RSI {v['rsi'][i]:.0f}"
-    return None
+
+    # 4. Healthy RSI (not overextended)
+    if not (35 <= v["rsi"][i] <= 70):
+        return None
+
+    return "ema_pullback", f"EMA20 pullback bounce, RSI {v['rsi'][i]:.0f}"
 
 
 def s_sweep(v, atr, volr, tb):
+    """Liquidity Sweep & Reclaim."""
     i = len(v["c"]) - 1
     c, o, h, l = v["c"][i], v["o"][i], v["h"][i], v["l"][i]
     lvl = v["l"][i - 40:i - 1].min()
