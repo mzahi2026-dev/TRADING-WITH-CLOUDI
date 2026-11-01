@@ -82,6 +82,14 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 .jbar strong{font-size:11px;color:#e7f0fb;letter-spacing:.3px}
 .jselect{background:#0c121a;border:1px solid #26384c;color:#cbd5e1;font-size:11px;padding:3px 6px;border-radius:4px;outline:none;max-width:170px}
 
+.jfilter-bar{display:flex;gap:4px;padding:5px 8px;background:#101722;border-bottom:1px solid #1a2533}
+.jf-btn{flex:1;background:#16212e;border:1px solid #233446;color:#94a7bd;font-size:10px;padding:4px 2px;border-radius:4px;cursor:pointer;font-weight:600;transition:all .15s}
+.jf-btn:hover{background:#1e2d3e;color:#fff}
+.jf-btn.active{background:#1e3a5f;color:#63b3ed;border-color:#3182ce}
+.badge-engine{font-size:9px;padding:1px 4px;border-radius:3px;font-weight:700;letter-spacing:.3px;display:inline-block;margin-right:4px}
+.badge-rule{background:#102a45;color:#63b3ed;border:1px solid #2b6cb0}
+.badge-ai{background:#2a1b3d;color:#d6bcfa;border:1px solid #7c3aed}
+
 /* Watch table: responsive and fluid with sidebar width */
 .watch-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
 .watch-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 5px}
@@ -155,6 +163,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
       <div id="jobs" class="note">-</div>
     </div>
     <div id="ltab-journal" style="display:none">
+      <div class="jfilter-bar">
+        <button class="jf-btn active" data-eng="ALL">🌐 All</button>
+        <button class="jf-btn" data-eng="RULE">📐 Rule Engine</button>
+        <button class="jf-btn" data-eng="AI">🧠 Gemini AI</button>
+      </div>
       <div class="journal-split-summary" id="journalSummary">
         <div class="section-toolbar"><strong>📊 DAILY SUMMARY CARD</strong><span style="color:#4aa3ff;font-size:11px">Crypto Day (06:00 BDT)</span></div>
         <div class="sum-wrap" id="jSummaryWrap">Loading summary...</div>
@@ -810,9 +823,18 @@ const raw = value => (value === null || value === undefined || value === '') ? '
 const directional = side => String(side || '').toUpperCase() === 'LONG' ? 'positive' : String(side || '').toUpperCase() === 'SHORT' ? 'negative' : '';
 const humanKey = key => key.replace(/_/g,' ').replace(/\b\w/g, m => m.toUpperCase());
 const extraDetails = (obj, ignored=[]) => {
-  const keys = Object.keys(obj || {}).filter(k => !ignored.includes(k) && obj[k] != null && obj[k] !== '');
-  if (!keys.length) return '<span class="dim">Additional details not returned by API.</span>';
-  return `<div class="details-grid">${keys.map(k => `<div><span class="k">${esc(humanKey(k))}:</span> <span class="v">${raw(typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : obj[k])}</span></div>`).join('')}</div>`;
+  let aiBanner = '';
+  if (obj && (String(obj.engine || '').toUpperCase() === 'AI' || obj.ai_thesis)) {
+    aiBanner = `
+      <div style="background:#261838;border:1px solid #7c3aed;border-radius:4px;padding:6px 8px;margin-bottom:8px">
+        <div style="color:#d6bcfa;font-weight:700;font-size:11px;margin-bottom:3px">🧠 Gemini AI Autonomous Thesis ${obj.ai_confidence ? `(Conf: ${esc(obj.ai_confidence)}%)` : ''}</div>
+        <div style="color:#e2e8f0;font-size:11px;line-height:1.4">${esc(obj.ai_thesis || 'Autonomous Market Structure Setup')}</div>
+      </div>
+    `;
+  }
+  const keys = Object.keys(obj || {}).filter(k => !ignored.includes(k) && obj[k] != null && obj[k] !== '' && k !== 'ai_thesis');
+  if (!keys.length) return aiBanner || '<span class="dim">Additional details not returned by API.</span>';
+  return aiBanner + `<div class="details-grid">${keys.map(k => `<div><span class="k">${esc(humanKey(k))}:</span> <span class="v">${raw(typeof obj[k] === 'object' ? JSON.stringify(obj[k]) : obj[k])}</span></div>`).join('')}</div>`;
 };
 function fmtVol(v) {
   if (v == null || isNaN(v) || v <= 0) return '-';
@@ -895,8 +917,9 @@ function renderSignals(data) {
 
 function renderPosTable(rows, isHistory, offset=0) {
   if (!rows.length) return `<div class="note" style="padding:10px">${isHistory ? 'No trade history yet' : 'No open positions'}</div>`;
+  const engBadge = r => String(r.engine || '').toUpperCase() === 'AI' ? '<span class="badge-engine badge-ai">AI</span>' : '<span class="badge-engine badge-rule">RULE</span>';
   const cols = isHistory ? [
-    ['Symbol', 'col-sym', r => raw(pick(r,'symbol','coin'))],
+    ['Symbol', 'col-sym', r => engBadge(r) + `<span class="symname">${raw(pick(r,'symbol','coin'))}</span>`],
     ['Side', 'col-side', r => `<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
     ['Entry', 'col-entry', r => { let v=pick(r,'entry_price','entry'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
     ['Exit', 'col-mark', r => { let v=pick(r,'exit_price','close_price','mark_price','current_price'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
@@ -905,7 +928,7 @@ function renderPosTable(rows, isHistory, offset=0) {
     ['Net PnL', 'col-pnl', r => { let v=pick(r,'net_pnl','realized_pnl','pnl','unrealized_pnl'); return v==null?'—':`<span class="${Number(v)>=0?'positive':'negative'}">${Number(v)>=0?'+':''}${fmt(v,2)}</span>`; }],
     ['Result', 'col-status', r => raw(pick(r,'result','status','state'))]
   ] : [
-    ['Symbol', 'col-sym', r => raw(pick(r,'symbol','coin'))],
+    ['Symbol', 'col-sym', r => engBadge(r) + `<span class="symname">${raw(pick(r,'symbol','coin'))}</span>`],
     ['Side', 'col-side', r => `<span class="${directional(pick(r,'side','direction'))}">${raw(pick(r,'side','direction'))}</span>`],
     ['Entry', 'col-entry', r => { let v=pick(r,'entry_price','entry'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
     ['Mark', 'col-mark', r => { let v=pick(r,'mark_price','current_price'); return (v==null||Number(v)<=0)?'—':priceText(v); }],
@@ -971,9 +994,10 @@ async function loadSP() {
 }
 
 // ---------- left sidebar: journal & summary
+let journalEngine = 'ALL';
 async function loadJournal() {
   try {
-    const res = await fetch('/api/journal');
+    const res = await fetch('/api/journal?engine=' + encodeURIComponent(journalEngine));
     if (!res.ok) throw new Error('API failed');
     journalData = await res.json();
     renderJournalSummary(journalData.summary);
@@ -985,6 +1009,15 @@ async function loadJournal() {
   }
 }
 
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.jf-btn');
+  if (!btn) return;
+  document.querySelectorAll('.jf-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  journalEngine = btn.dataset.eng || 'ALL';
+  loadJournal();
+});
+
 function renderJournalSummary(s) {
   if (!s) return;
   const pnlSign = Number(s.today_pnl) >= 0 ? '+' : '';
@@ -994,7 +1027,7 @@ function renderJournalSummary(s) {
       <div class="jcard full">
         <small>💳 DEMO WALLET BALANCE</small>
         <div class="val">$${Number(s.balance).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} <span style="font-size:11px;font-weight:400;color:#94a7bd">USDT</span></div>
-        <div class="sub">Available: $${Number(s.available).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} USDT</div>
+        <div class="sub">Available: $${Number(s.available).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2})} USDT | Filter: <b>${s.current_filter || 'ALL'}</b></div>
       </div>
       <div class="jcard">
         <small>📈 TODAY NET PNL</small>
@@ -1004,7 +1037,7 @@ function renderJournalSummary(s) {
       <div class="jcard">
         <small>📊 TRADES TODAY</small>
         <div class="val">${s.today_trades} <span style="font-size:11px;font-weight:400;color:#94a7bd">Opened</span></div>
-        <div class="sub">🟢 <b>${s.active_positions}</b> Active Now</div>
+        <div class="sub">🟢 <b>${s.active_positions}</b> Active | 📐${s.rule_today_trades} 🧠${s.ai_today_trades}</div>
       </div>
       <div class="jcard">
         <small>🎯 TP HIT</small>
@@ -1044,7 +1077,10 @@ function renderJournalTableForDay(dateStr) {
   }
   const jcols = [
     ['Time', 'col-sym', r => `<span style="font-size:10px;color:#8595a8">${raw(r.time)}</span>`],
-    ['Symbol', 'col-sym', r => `<span class="symname">${raw(r.symbol)}</span>`],
+    ['Symbol', 'col-sym', r => {
+      const b = String(r.engine || '').toUpperCase() === 'AI' ? '<span class="badge-engine badge-ai">AI</span>' : '<span class="badge-engine badge-rule">RULE</span>';
+      return b + `<span class="symname">${raw(r.symbol)}</span>`;
+    }],
     ['Side', 'col-side', r => `<span class="${directional(r.side)}">${raw(r.side)}</span>`],
     ['Strategy', 'col-sym', r => `<span style="font-size:10px">${raw(r.strategy)}</span>`],
     ['Entry', 'col-entry', r => priceText(r.entry)],

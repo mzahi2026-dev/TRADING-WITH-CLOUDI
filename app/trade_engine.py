@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS positions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     time TEXT, symbol TEXT, strategy TEXT, side TEXT,
     entry REAL, sl REAL, tp REAL, qty REAL, status TEXT,
-    exit REAL, pnl REAL, fee REAL, result TEXT, closed TEXT, entry_ms INTEGER
+    exit REAL, pnl REAL, fee REAL, result TEXT, closed TEXT, entry_ms INTEGER,
+    engine TEXT DEFAULT 'RULE', ai_thesis TEXT, ai_confidence INTEGER
 );
 """
 
@@ -48,6 +49,16 @@ class Engine:
         self.lev_set = set()
         con = self.db()
         con.executescript(SCHEMA)
+        try:
+            cols = [r[1] for r in con.execute("PRAGMA table_info(positions)").fetchall()]
+            if "engine" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN engine TEXT DEFAULT 'RULE'")
+            if "ai_thesis" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN ai_thesis TEXT")
+            if "ai_confidence" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN ai_confidence INTEGER")
+        except Exception:
+            pass
         con.commit()
         con.close()
 
@@ -506,18 +517,40 @@ class Engine:
                     "WHERE id=?", (ex, round(net, 4), round(fee, 4), res, bdt(), pid))
         con.commit()
         log.info(f"CLOSED {sym} {side} {res} | exit {ex:.6g} | net {net:+.4f} USDT (fee {fee:.4f})")
+        engine_type = "RULE"
         try:
-            from .notifier import send_trade_closed_alert
-            send_trade_closed_alert(
-                pid=pid,
-                sym=sym,
-                side=side,
-                res=res,
-                entry=entry,
-                ex=ex,
-                net=net,
-                fee=fee,
-                dry=self.dry
-            )
+            erow = con.execute("SELECT engine FROM positions WHERE id=?", (pid,)).fetchone()
+            if erow and erow[0]:
+                engine_type = str(erow[0]).upper()
+        except Exception:
+            pass
+
+        try:
+            if engine_type == "AI":
+                from .notifier import send_ai_trade_closed_alert
+                send_ai_trade_closed_alert(
+                    pid=pid,
+                    sym=sym,
+                    side=side,
+                    res=res,
+                    entry=entry,
+                    ex=ex,
+                    net=net,
+                    fee=fee,
+                    dry=self.dry
+                )
+            else:
+                from .notifier import send_trade_closed_alert
+                send_trade_closed_alert(
+                    pid=pid,
+                    sym=sym,
+                    side=side,
+                    res=res,
+                    entry=entry,
+                    ex=ex,
+                    net=net,
+                    fee=fee,
+                    dry=self.dry
+                )
         except Exception as te:
             log.warning(f"Telegram alert error on close: {te}")

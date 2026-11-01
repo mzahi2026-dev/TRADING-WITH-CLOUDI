@@ -25,6 +25,7 @@ from app.scanner import run_scan
 from app.storage import Storage
 from app.symbols import get_symbols
 from app.trade_engine import Engine
+from app.ai_engine import AIEngine
 from app.trade_log import log as tlog
 import app_ui
 
@@ -163,6 +164,15 @@ def run_trader_worker():
                 coalesce=True,
                 misfire_grace_time=120,
             )
+            # Workflow 2: Gemini AI Autonomous Engine Cycle
+            ai_eng = AIEngine(dry=dry_mode)
+            sched.add_job(
+                ai_eng.cycle,
+                CronTrigger(minute="0,15,30,45", second=tc.CYCLE_SECOND + 10, timezone="Asia/Dhaka"),
+                max_instances=1,
+                coalesce=True,
+                misfire_grace_time=120,
+            )
             sched.add_job(
                 eng.reconcile_job,
                 IntervalTrigger(seconds=60),
@@ -170,7 +180,7 @@ def run_trader_worker():
                 coalesce=True,
             )
             sched.start()
-            tlog.info(f"Trader Engine running in SAFE DRY MODE | Cycle every 15m (+{tc.CYCLE_SECOND}s)")
+            tlog.info(f"Trader Engine & Gemini AI Engine running | 15m Cycles active (+{tc.CYCLE_SECOND}s / +{tc.CYCLE_SECOND + 10}s)")
 
             while sched.running:
                 time.sleep(30)

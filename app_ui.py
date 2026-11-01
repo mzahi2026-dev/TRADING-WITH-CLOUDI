@@ -330,7 +330,7 @@ def positions():
 
 
 @app.get("/api/journal")
-def journal_summary():
+def journal_summary(engine: str = "ALL"):
     con = db()
     if not has_table(con, "positions"):
         con.close()
@@ -338,6 +338,8 @@ def journal_summary():
             "summary": {
                 "balance": 0.0, "available": 0.0, "today_pnl": 0.0, "today_trades": 0,
                 "active_positions": 0, "tp_count": 0, "tp_usdt": 0.0, "sl_count": 0, "sl_usdt": 0.0,
+                "rule_today_trades": 0, "ai_today_trades": 0, "rule_today_pnl": 0.0, "ai_today_pnl": 0.0,
+                "current_filter": engine.upper(),
             },
             "days": [],
             "trades_by_day": {}
@@ -367,6 +369,16 @@ def journal_summary():
 
     BDT = timezone(timedelta(hours=6))
 
+    if not df.empty:
+        if "engine" not in df.columns:
+            df["engine"] = "RULE"
+        else:
+            df["engine"] = df["engine"].fillna("RULE")
+        if "ai_thesis" not in df.columns:
+            df["ai_thesis"] = ""
+        if "ai_confidence" not in df.columns:
+            df["ai_confidence"] = None
+
     def get_date_str(row):
         ems = row.get("entry_ms")
         if ems and not pd.isna(ems) and ems > 0:
@@ -389,13 +401,32 @@ def journal_summary():
         df["date_str"] = []
 
     today_str = now_utc.strftime("%Y-%m-%d")
-    active_mask = df["status"].str.upper().isin(["OPEN", "EMERGENCY_UNPROTECTED"]) if not df.empty else pd.Series([], dtype=bool)
-    active_count = int(active_mask.sum()) if not df.empty else 0
 
-    today_mask = (df["date_str"] == today_str) if not df.empty else pd.Series([], dtype=bool)
-    today_trades = int(today_mask.sum()) if not df.empty else 0
+    # Engine metrics across entire today dataset
+    today_all = df[df["date_str"] == today_str] if not df.empty else pd.DataFrame()
+    rule_today_trades = int((today_all["engine"].str.upper() != "AI").sum()) if not today_all.empty else 0
+    ai_today_trades = int((today_all["engine"].str.upper() == "AI").sum()) if not today_all.empty else 0
 
-    today_closed = df[today_mask & (df["status"].str.upper() == "CLOSED")] if not df.empty else pd.DataFrame()
+    today_closed_all = today_all[today_all["status"].str.upper() == "CLOSED"] if not today_all.empty else pd.DataFrame()
+    rule_today_pnl = float(today_closed_all[today_closed_all["engine"].str.upper() != "AI"]["pnl"].sum()) if not today_closed_all.empty else 0.0
+    ai_today_pnl = float(today_closed_all[today_closed_all["engine"].str.upper() == "AI"]["pnl"].sum()) if not today_closed_all.empty else 0.0
+
+    # Filter df by engine query parameter
+    eng_up = engine.upper()
+    if eng_up == "AI":
+        filtered_df = df[df["engine"].str.upper() == "AI"] if not df.empty else pd.DataFrame()
+    elif eng_up == "RULE":
+        filtered_df = df[df["engine"].str.upper() != "AI"] if not df.empty else pd.DataFrame()
+    else:
+        filtered_df = df
+
+    active_mask = filtered_df["status"].str.upper().isin(["OPEN", "EMERGENCY_UNPROTECTED"]) if not filtered_df.empty else pd.Series([], dtype=bool)
+    active_count = int(active_mask.sum()) if not filtered_df.empty else 0
+
+    today_mask = (filtered_df["date_str"] == today_str) if not filtered_df.empty else pd.Series([], dtype=bool)
+    today_trades = int(today_mask.sum()) if not filtered_df.empty else 0
+
+    today_closed = filtered_df[today_mask & (filtered_df["status"].str.upper() == "CLOSED")] if not filtered_df.empty else pd.DataFrame()
     today_pnl = float(today_closed["pnl"].sum()) if not today_closed.empty else 0.0
 
     tp_closed = today_closed[today_closed["result"].str.upper() == "TP"] if not today_closed.empty else pd.DataFrame()
@@ -412,7 +443,7 @@ def journal_summary():
         d = now_utc - timedelta(days=i)
         ds = d.strftime("%Y-%m-%d")
         lbl = "Today" if i == 0 else ("Yesterday" if i == 1 else d.strftime("%a, %d %b"))
-        day_trades_df = df[df["date_str"] == ds] if not df.empty else pd.DataFrame()
+        day_trades_df = filtered_df[filtered_df["date_str"] == ds] if not filtered_df.empty else pd.DataFrame()
         day_pnl = float(day_trades_df["pnl"].sum()) if not day_trades_df.empty else 0.0
         days_list.append({
             "date": ds,
@@ -433,6 +464,11 @@ def journal_summary():
             "tp_usdt": round(tp_usdt, 2),
             "sl_count": sl_count,
             "sl_usdt": round(sl_usdt, 2),
+            "rule_today_trades": rule_today_trades,
+            "ai_today_trades": ai_today_trades,
+            "rule_today_pnl": round(rule_today_pnl, 2),
+            "ai_today_pnl": round(ai_today_pnl, 2),
+            "current_filter": eng_up,
         },
         "days": days_list,
         "trades_by_day": trades_by_day

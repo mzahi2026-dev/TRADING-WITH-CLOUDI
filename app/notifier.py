@@ -83,6 +83,55 @@ def send_trade_opened_alert(pid: int, sym: str, side: str, strat: str, entry, sl
     return send_alert(msg, parse_mode="HTML")
 
 
+def send_ai_trade_opened_alert(pid: int, sym: str, side: str, thesis: str, confidence: int, entry, sl, tp, dry: bool = False):
+    """Alert on autonomous Gemini AI trade open."""
+    now_dt = datetime.now(BDT)
+    day_date, time_str, full_str = format_dt(now_dt)
+    ref_no = f"TRD-{pid:04d}" if pid else f"TRD-{int(time.time()) % 10000:04d}"
+
+    side_icon = "🟢" if str(side).upper() == "LONG" else "🔴"
+    mode_str = "DRY RUN | 15M" if dry else "DEMO | 15M"
+
+    msg = (
+        f"🧠 <b>GEMINI AI TRADE | {side_icon} {side.upper()}</b>\n"
+        f"🔖 <b>Ref:</b> <code>#{ref_no}</code> (AI Autonomous)\n"
+        f"📅 <i>{full_str}</i>\n\n"
+        f"🪙 <b>Symbol:</b> {sym}\n"
+        f"💰 <b>Entry:</b> {entry}\n"
+        f"🛑 <b>SL:</b> {sl} (-$15.00 USDT)\n"
+        f"🎯 <b>TP:</b> {tp} (+$30.00 USDT)\n"
+        f"⚖️ <b>Risk:Reward:</b> 1 : 2.0\n"
+        f"🎯 <b>AI Confidence:</b> {confidence}%\n\n"
+        f"📝 <b>AI Thesis:</b>\n"
+        f"<i>\"{thesis}\"</i>\n"
+        f"🧪 <b>{mode_str}</b>"
+    )
+    return send_alert(msg, parse_mode="HTML")
+
+
+def send_ai_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, net: float, fee: float, dry: bool = False):
+    """Alert on autonomous Gemini AI trade close."""
+    now_dt = datetime.now(BDT)
+    day_date, time_str, full_str = format_dt(now_dt)
+    ref_no = f"TRD-{pid:04d}" if pid else f"TRD-{int(time.time()) % 10000:04d}"
+
+    pnl_icon = "✅" if net >= 0 else "🛑"
+    pnl_heart = "💚" if net >= 0 else "💔"
+    pnl_sign = "+" if net > 0 else ""
+    mode_str = "DRY RUN" if dry else "DEMO"
+
+    msg = (
+        f"🧠 <b>GEMINI AI TRADE CLOSED | {sym}</b>\n"
+        f"🔖 <b>Ref:</b> <code>#{ref_no}</code>\n"
+        f"📅 <i>{full_str}</i>\n\n"
+        f"💰 <b>Entry:</b> {entry} → <b>Exit:</b> {ex:.6g}\n"
+        f"{pnl_icon} <b>Result:</b> {res}\n"
+        f"{pnl_heart} <b>Net PnL:</b> {pnl_sign}{net:+.4f} USDT\n"
+        f"🧪 <b>{mode_str}</b>"
+    )
+    return send_alert(msg, parse_mode="HTML")
+
+
 def send_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, net: float, fee: float, dry: bool = False):
     """Alert on trade close matching card format with Day, Date, Time and Ref No."""
     now_dt = datetime.now(BDT)
