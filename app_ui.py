@@ -351,10 +351,10 @@ def journal_summary():
     except Exception as e:
         log.warning(f"Journal balance check: {e}")
 
-    BDT = timezone(timedelta(hours=6))
-    now_dt = datetime.now(BDT)
-    today_start = datetime(now_dt.year, now_dt.month, now_dt.day, tzinfo=BDT)
-    today_start_ms = int(today_start.timestamp() * 1000)
+    # Crypto Trading Day: 00:00 UTC = 06:00 AM BDT (Binance 1D candle close)
+    now_utc = datetime.now(timezone.utc)
+    today_start_utc = datetime(now_utc.year, now_utc.month, now_utc.day, tzinfo=timezone.utc)
+    today_start_ms = int(today_start_utc.timestamp() * 1000)
     seven_days_ago_ms = today_start_ms - 6 * 86400 * 1000
 
     df = pd.read_sql_query(
@@ -365,21 +365,30 @@ def journal_summary():
         df = pd.read_sql_query("SELECT * FROM positions ORDER BY rowid DESC LIMIT 100", con)
     con.close()
 
+    BDT = timezone(timedelta(hours=6))
+
     def get_date_str(row):
         ems = row.get("entry_ms")
         if ems and not pd.isna(ems) and ems > 0:
-            return datetime.fromtimestamp(ems / 1000, tz=BDT).strftime("%Y-%m-%d")
+            return datetime.fromtimestamp(ems / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         t = str(row.get("time") or "")
         if len(t) >= 5 and "-" in t:
-            return f"{now_dt.year}-{t[:5]}"
-        return now_dt.strftime("%Y-%m-%d")
+            try:
+                mm, dd = int(t[:2]), int(t[3:5])
+                hh = int(t[6:8]) if len(t) >= 8 else 0
+                mi = int(t[9:11]) if len(t) >= 11 else 0
+                dt_bdt = datetime(now_utc.year, mm, dd, hh, mi, tzinfo=BDT)
+                return dt_bdt.astimezone(timezone.utc).strftime("%Y-%m-%d")
+            except Exception:
+                pass
+        return now_utc.strftime("%Y-%m-%d")
 
     if not df.empty:
         df["date_str"] = df.apply(get_date_str, axis=1)
     else:
         df["date_str"] = []
 
-    today_str = now_dt.strftime("%Y-%m-%d")
+    today_str = now_utc.strftime("%Y-%m-%d")
     active_mask = df["status"].str.upper().isin(["OPEN", "EMERGENCY_UNPROTECTED"]) if not df.empty else pd.Series([], dtype=bool)
     active_count = int(active_mask.sum()) if not df.empty else 0
 
@@ -400,7 +409,7 @@ def journal_summary():
     days_list = []
     trades_by_day = {}
     for i in range(7):
-        d = now_dt - timedelta(days=i)
+        d = now_utc - timedelta(days=i)
         ds = d.strftime("%Y-%m-%d")
         lbl = "Today" if i == 0 else ("Yesterday" if i == 1 else d.strftime("%a, %d %b"))
         day_trades_df = df[df["date_str"] == ds] if not df.empty else pd.DataFrame()
