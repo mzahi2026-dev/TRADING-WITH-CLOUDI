@@ -55,7 +55,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 
 /* Detailed terminal panes: compact rows, responsive horizontal scrolling */
 #right{overflow:hidden}
-#tab-watch,#tab-signal,#tab-pos{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+#tab-watch,#tab-signal{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}
+#tab-pos{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden;height:100%}
+.pos-split-open{height:40%;display:flex;flex-direction:column;overflow:hidden;border-bottom:2px solid #1c2736}
+.pos-split-history{height:60%;display:flex;flex-direction:column;overflow:hidden;flex:1}
+.pos-split-open .terminal-table-wrap, .pos-split-history .terminal-table-wrap{flex:1;overflow:auto;scrollbar-width:thin}
 .terminal-table-wrap{width:100%;overflow-x:auto;scrollbar-width:thin}
 
 /* Watch table: responsive and fluid with sidebar width */
@@ -90,10 +94,6 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 .pos-table .num{text-align:right}
 .pos-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
 .pos-table .detail-row{cursor:default}
-.pos-subnav{display:flex;gap:5px;padding:6px 10px;background:#0d141e;border-bottom:1px solid #1f2b3a}
-.pos-subbtn{background:#151f2b;border:1px solid #233448;color:#94a7bd;font-size:11px;padding:4px 9px;border-radius:4px;cursor:pointer}
-.pos-subbtn:hover{background:#1d2c3e;color:#fff}
-.pos-subbtn.on{background:#233d5d;border-color:#38608f;color:#fff;font-weight:600}
 
 .terminal-table{border-collapse:collapse;width:100%;min-width:100%;font-size:11px;font-variant-numeric:tabular-nums;table-layout:auto}
 .terminal-table th{position:sticky;top:0;background:#172230;color:#91a3b8;text-transform:uppercase;font-size:10px;letter-spacing:.3px;z-index:1;white-space:nowrap;padding:6px 4px}
@@ -837,7 +837,6 @@ function renderSignals(data) {
   if (!rows.length) return `<div class="note">${raw(data.note || 'No signals')}</div>`;
   return `<div class="section-toolbar"><strong>SIGNAL HISTORY</strong><span>${rows.length} signals</span></div><div class="signal-stack">${rows.map(signalCard).join('')}</div>`;
 }
-let posSubView = localStorage.getItem('pos_sub_view') || 'all';
 
 function renderPosTable(rows, isHistory, offset=0) {
   if (!rows.length) return `<div class="note" style="padding:10px">${isHistory ? 'No trade history yet' : 'No open positions'}</div>`;
@@ -877,44 +876,24 @@ function renderPositions(data) {
   const openRows = rows.filter(r => ['OPEN', 'EMERGENCY_UNPROTECTED'].includes(String(pick(r, 'status', 'state') || '').toUpperCase()));
   const historyRows = rows.filter(r => !['OPEN', 'EMERGENCY_UNPROTECTED'].includes(String(pick(r, 'status', 'state') || '').toUpperCase()));
 
-  const subNav = `
-    <div class="pos-subnav">
-      <button class="pos-subbtn ${posSubView==='all'?'on':''}" data-pv="all">All (${rows.length})</button>
-      <button class="pos-subbtn ${posSubView==='open'?'on':''}" data-pv="open">🟢 Positions (${openRows.length})</button>
-      <button class="pos-subbtn ${posSubView==='history'?'on':''}" data-pv="history">📜 Trade History (${historyRows.length})</button>
-    </div>
-  `;
-
-  let content = '';
-  if (posSubView === 'all' || posSubView === 'open') {
-    content += `
+  return `
+    <div class="pos-split-open">
       <div class="section-toolbar">
-        <strong>🟢 ACTIVE POSITIONS</strong>
-        <span>${openRows.length} open</span>
+        <strong>🟢 OPEN POSITIONS (${openRows.length})</strong>
+        <span style="color:#26a69a">40% Height</span>
       </div>
       ${renderPosTable(openRows, false, 0)}
-    `;
-  }
-  if (posSubView === 'all' || posSubView === 'history') {
-    content += `
-      <div class="section-toolbar" style="margin-top:${posSubView==='all'?'10px':'0'}">
-        <strong>📜 TRADE HISTORY</strong>
-        <span>${historyRows.length} closed</span>
+    </div>
+    <div class="pos-split-history">
+      <div class="section-toolbar">
+        <strong>📜 TRADE HISTORY (${historyRows.length})</strong>
+        <span style="color:#7d8896">60% Height</span>
       </div>
       ${renderPosTable(historyRows, true, openRows.length)}
-    `;
-  }
-
-  return subNav + content;
+    </div>
+  `;
 }
 document.addEventListener('click', e => {
-  const btn = e.target.closest('.pos-subbtn');
-  if (btn) {
-    posSubView = btn.dataset.pv;
-    localStorage.setItem('pos_sub_view', posSubView);
-    loadSP();
-    return;
-  }
   const row = e.target.closest('tr[data-pos-index]');
   if (!row) return;
   const idx = row.dataset.posIndex;
