@@ -118,7 +118,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
 .pos-table th.col-tp, .pos-table td.col-tp{text-align:right;min-width:52px}
 .pos-table th.col-pnl, .pos-table td.col-pnl{text-align:right;font-weight:700;min-width:54px}
 .pos-table th.col-status, .pos-table td.col-status{text-align:center;min-width:55px;font-size:10px}
-.pos-table tbody tr[data-pos-index]{cursor:pointer}.pos-table tbody tr[data-pos-index]:hover{background:#1d3042}
+.pos-table tbody tr[data-pos-index], .pos-table tbody tr[data-j-index]{cursor:pointer}
+.pos-table tbody tr[data-pos-index]:hover, .pos-table tbody tr[data-j-index]:hover{background:#1d3042}
+.pos-table tbody tr.sel{background:#173451!important}
+.pos-table .symname{color:#38bdf8;font-weight:700}
+.pos-table tbody tr:hover .symname{color:#60a5fa;text-decoration:underline}
 .pos-table .num{text-align:right}
 .pos-table .detail-row td{white-space:normal;background:#101c2b;padding:10px;line-height:1.6}
 .pos-table .detail-row{cursor:default}
@@ -682,7 +686,7 @@ function setSym(s) {
   if (sym === s) return;
   sym = s; loadedCandleKey = null; localStorage.setItem('sym', sym); $('#sym').value = sym;
   $('#msg').textContent = 'Loading ' + sym + '...';
-  document.querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r.dataset.s === sym));
+  document.querySelectorAll('.row, [data-s]').forEach(r => r.classList.toggle('sel', r.dataset.s === sym));
   loadDr(); setTool('cursor');
   load(true); connectWS();
 }
@@ -941,8 +945,9 @@ function renderPosTable(rows, isHistory, offset=0) {
   const headers = cols.map(([label, cls]) => `<th class="${cls}">${esc(label)}</th>`).join('');
   const body = rows.map((r, i) => {
     const idx = offset + i;
+    const symVal = String(pick(r, 'symbol', 'coin') || '').toUpperCase();
     const values = cols.map(([label, cls, get]) => `<td class="${cls} ${['Entry','Exit','Mark','SL','TP','PnL','Net PnL'].includes(label)?'num':''}">${get(r)}</td>`).join('');
-    return `<tr data-pos-index="${idx}" title="Click for details">${values}</tr><tr class="detail-row" data-detail-index="${idx}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+    return `<tr data-pos-index="${idx}" data-s="${esc(symVal)}" class="${symVal === sym ? 'sel' : ''}" title="Click to open ${esc(symVal)} chart & details">${values}</tr><tr class="detail-row" data-detail-index="${idx}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
   }).join('');
   return `<div class="terminal-table-wrap"><table class="pos-table"><thead><tr>${headers}</tr></thead><tbody>${body}</tbody></table></div>`;
 }
@@ -974,6 +979,10 @@ function renderPositions(data) {
 document.addEventListener('click', e => {
   const row = e.target.closest('tr[data-pos-index]');
   if (!row) return;
+  const s = row.dataset.s;
+  if (s) {
+    setSym(s);
+  }
   const idx = row.dataset.posIndex;
   const parent = row.closest('table');
   if (!parent) return;
@@ -1090,8 +1099,9 @@ function renderJournalTableForDay(dateStr) {
   ];
   const headers = jcols.map(([lbl, cls]) => `<th class="${cls}">${esc(lbl)}</th>`).join('');
   const body = rows.map((r, i) => {
+    const symVal = String(r.symbol || '').toUpperCase();
     const values = jcols.map(([lbl, cls, fn]) => `<td class="${cls} ${['Entry','Exit','PnL'].includes(lbl)?'num':''}">${fn(r)}</td>`).join('');
-    return `<tr data-j-index="${i}" title="Click for details">${values}</tr><tr class="detail-row" id="j-detail-${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
+    return `<tr data-j-index="${i}" data-s="${esc(symVal)}" class="${symVal === sym ? 'sel' : ''}" title="Click to open ${esc(symVal)} chart & details">${values}</tr><tr class="detail-row" id="j-detail-${i}" style="display:none"><td colspan="8">${extraDetails(r)}</td></tr>`;
   }).join('');
   $('#jTableWrap').innerHTML = `
     <div class="terminal-table-wrap">
@@ -1106,6 +1116,10 @@ function renderJournalTableForDay(dateStr) {
 document.addEventListener('click', e => {
   const row = e.target.closest('tr[data-j-index]');
   if (!row) return;
+  const s = row.dataset.s;
+  if (s) {
+    setSym(s);
+  }
   const idx = row.dataset.jIndex;
   const det = document.getElementById('j-detail-' + idx);
   if (det) det.style.display = det.style.display === 'none' ? '' : 'none';

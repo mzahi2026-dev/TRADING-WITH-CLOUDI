@@ -35,7 +35,7 @@ class AIEngine:
         self.pub = BinanceClient()
         self.dc = None if dry else DemoClient()
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
-        self.model_name = getattr(tc, "AI_MODEL", "gemini-2.5-flash")
+        self.model_name = getattr(tc, "AI_MODEL", "gemini-3.8-flash")
         self.ensure_schema()
 
     def db(self):
@@ -129,7 +129,7 @@ class AIEngine:
                 from google import genai
                 client = genai.Client(api_key=self.api_key)
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-3.8-flash",
                     contents=prompt,
                 )
                 txt = response.text or ""

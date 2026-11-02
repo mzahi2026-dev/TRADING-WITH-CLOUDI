@@ -26,4 +26,4 @@ AI_NOTIONAL_USDT = 200.0          # max invest 200 USDT per trade
 AI_SL_USDT = 15.0                 # fixed SL $15
 AI_TP_USDT = 30.0                 # fixed TP $30 (1:2 R:R)
 AI_MIN_CONFIDENCE = 70            # minimum confidence to take trade (1-100)
-AI_MODEL = "gemini-2.5-flash"     # Gemini model
+AI_MODEL = "gemini-3.8-flash"     # Gemini model

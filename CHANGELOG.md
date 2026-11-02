@@ -2,6 +2,24 @@
 
 ---
 
+## [2026-11-03] — Click Position Symbol to Open Chart & Upgrade to gemini-3.8-flash
+
+### 1. Position পেজ ও ট্রেডিং জার্নাল থেকে ক্লিকে চার্ট ওপেন
+- **তারিখ ও সময়:** 2026-11-03 00:35 BDT
+- **উদ্দেশ্য:** ইউজারের চাহিদা অনুযায়ী Position পেজের Open Positions, Trade History এবং Left Sidebar Journal টেবিলে যেকোনো সিম্বলে ক্লিক করলে সাথে সাথে মাঝখানের চার্টে সেই সিম্বলের লাইভ চার্ট ওপেন হওয়া।
+- **পরিবর্তনসমূহ:**
+  - `static/index.html`: Open Positions ও Trade History টেবিলের প্রতিটি রো-তে `data-s` এট্রিবিউট এবং ক্লিক লিসেনারে `setSym(s)` যুক্ত করা হয়েছে।
+  - `static/index.html`: Journal টেবিল রো-তেও ক্লিক লিসেনারে `setSym(s)` যুক্ত করা হয়েছে।
+  - CSS স্টাইলিং: সিম্বলের ওপর হোভার করলে হাইলাইট/আন্ডারলাইন এবং নির্বাচিত চার্টের সিম্বল রো হাইলাইট (`.sel`) নিশ্চিত করা হয়েছে।
+
+### 2. Gemini AI মডেল সংস্করণ আপগ্রেড (gemini-3.8-flash)
+- **উদ্দেশ্য:** গুগল এপিআই থেকে প্রাপ্ত নির্দেশ অনুযায়ী নতুন এপিআই কি-এর সাথে শতভাগ সামঞ্জস্যপূর্ণ `gemini-3.8-flash` মডেল কনফিগার করা।
+- **পরিবর্তনসমূহ:**
+  - `app/trade_config.py`: `AI_MODEL = "gemini-3.8-flash"` আপডেট।
+  - `app/ai_engine.py`: মডেল নাম ও ফলব্যাক মডেলে `gemini-3.8-flash` সেট।
+
+---
+
 ## [2026-11-02] — Fix Gemini SDK in Requirements & Live Mark/PnL in Open Positions
 
 ### 1. Requirements-এ google-genai প্যাকেজ যোগ ও রিমোট AI Engine সচলকরণ
