@@ -1,5 +1,18 @@
 # 📜 Trading Cloudi — Change Log & Project Register
 
+---
+
+## [2026-11-02] — Gemini API Key Activated 🔑
+
+### GEMINI_API_KEY সেটআপ ও AI Engine সক্রিয়করণ
+- **তারিখ ও সময়:** 2026-11-02 19:30 BDT
+- **উদ্দেশ্য:** `GEMINI_API_KEY` `.env` ও Render Environment Variables-এ যুক্ত করে Workflow 2 (Gemini AI Engine) সম্পূর্ণ সক্রিয় করা।
+- **পরিবর্তনসমূহ:**
+  - `.env`: `GEMINI_API_KEY` যুক্ত করা হয়েছে
+  - Render Service `srv-dbj5mvflk1mc738b08b0`: সকল ৫টি env var (DEMO_API_KEY, DEMO_API_SECRET, GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID) PUT করা হয়েছে
+  - Render Deploy `dep-dbk90og473hc73807r80` trigger করা হয়েছে
+- **প্রত্যাশিত ফলাফল:** পরবর্তী 15m scan cycle-এ Gemini AI Engine প্রথমবার activate হবে এবং Telegram-এ 🧠 branded trade card আসবে
+
 এই ফাইলে প্রজেক্টের প্রতিটি আপডেট, পরিবর্তন, ফিক্স এবং কনফিগারেশনের তারিখভিত্তিক পূর্ণাঙ্গ রেজিস্টার সংরক্ষিত থাকবে।
 
 ---

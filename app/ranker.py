@@ -265,7 +265,7 @@ def run_rank(wait=True):
 
     longs = sum(1 for r in rows if r[3] == "LONG")
     log.info(f"Ranking saved: top {len(rows)} (LONG {longs} / SHORT {len(rows) - longs}) | "
-             f"1h daily er biporite={len(mism)} | skipped={skipped}")
+             f"skipped={skipped}")
 
     cols = ["run_hour", "symbol", "rank", "side", "rank_score", "aligned", "daily_score",
             "trend", "sr", "volume", "oi", "ls", "close", "atr", "vol_ratio",
