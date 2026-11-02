@@ -2,6 +2,19 @@
 
 ---
 
+## [2026-11-02] — Fix Gemini SDK in Requirements & Live Mark/PnL in Open Positions
+
+### 1. Requirements-এ google-genai প্যাকেজ যোগ ও রিমোট AI Engine সচলকরণ
+- **তারিখ ও সময়:** 2026-11-02 23:02 BDT
+- **সমস্যা:** Render সার্ভারে ডিপ্লয়ের সময় `requirements.txt`-এ `google-genai` না থাকায় `No module named 'google'` এর কারণে Gemini AI Engine রান করতে পারছিল না।
+- **সমাধান:** `requirements.txt`-এ `google-genai>=2.0.0` যোগ করা হয়েছে।
+
+### 2. ওপেন পজিশন টেবিলে লাইভ Mark Price ও রিয়েলটাইম PnL প্রদর্শন
+- **সমস্যা:** UI এর Open Positions টেবিলে Mark এবং PnL কলামে ড্যাশ (`—`) দেখাচ্ছিল কারণ লোকাল ডেটাবেজে ওপেন পজিশনের লাইভ প্রাইস স্টোর ছিল না।
+- **সমাধান:** `app_ui.py`-এর `/api/positions` এন্ডপয়েন্টে বাইন্যান্স ডেমো `positionRisk` এপিআই এবং `premium` টেবিল থেকে লাইভ `mark_price` ও `unrealized_pnl` স্বয়ংক্রিয়ভাবে সংযুক্ত করা হয়েছে।
+
+---
+
 ## [2026-11-02] — Gemini API Key Activated 🔑
 
 ### GEMINI_API_KEY সেটআপ ও AI Engine সক্রিয়করণ

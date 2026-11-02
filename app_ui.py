@@ -325,8 +325,34 @@ def positions():
         con.close()
         return {"rows": [], "note": "Step 3 (demo executor) ekhono install hoyni."}
     df = pd.read_sql_query("SELECT * FROM positions ORDER BY rowid DESC LIMIT 100", con)
+    rows = clean(df)
+    try:
+        from app.demo_client import DemoClient
+        dc = DemoClient()
+        live_pos = {p["symbol"]: p for p in dc.positions() if float(p.get("positionAmt", 0)) != 0}
+        for r in rows:
+            sym = r.get("symbol")
+            st = str(r.get("status", "")).upper()
+            if st in ("OPEN", "EMERGENCY_UNPROTECTED"):
+                if sym in live_pos:
+                    lp = live_pos[sym]
+                    r["mark_price"] = float(lp.get("markPrice") or 0)
+                    r["unrealized_pnl"] = float(lp.get("unRealizedProfit") or 0)
+                else:
+                    # Fallback to premium table
+                    pr_row = con.execute("SELECT mark_price FROM premium WHERE symbol=? ORDER BY ts DESC LIMIT 1", (sym,)).fetchone()
+                    if pr_row and pr_row[0]:
+                        mp = float(pr_row[0])
+                        r["mark_price"] = mp
+                        en = float(r.get("entry") or 0)
+                        qt = float(r.get("qty") or 0)
+                        sd = str(r.get("side", "")).upper()
+                        if en > 0 and qt > 0:
+                            r["unrealized_pnl"] = round((mp - en) * qt if sd == "LONG" else (en - mp) * qt, 4)
+    except Exception:
+        pass
     con.close()
-    return {"rows": clean(df), "note": ""}
+    return {"rows": rows, "note": ""}
 
 
 @app.get("/api/journal")
