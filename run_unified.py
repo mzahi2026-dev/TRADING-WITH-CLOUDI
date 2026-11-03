@@ -144,8 +144,9 @@ def run_scanner_worker():
 
 def run_trader_worker():
     """Background trader scheduler with auto-recovery."""
-    dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
-    mode_str = "SAFE DRY RUN MODE (Paper)" if dry_mode else "BINANCE DEMO FUTURES (Live Demo Orders)"
+    # Fail-closed guard: default to execution disabled (dry_mode = True)
+    dry_mode = os.getenv("TRADER_DRY_MODE", "true").lower() in ("true", "1", "yes")
+    mode_str = "SAFE DRY RUN MODE (Execution Disabled)" if dry_mode else "LIVE ORDER EXECUTION REQUESTED"
     tlog.info(f"Trader Engine starting in {mode_str}")
 
     while True:
@@ -236,18 +237,22 @@ def start_health_monitor():
 def main():
     acquire_instance_lock()
 
-    print("=" * 65)
-    print("       TRADING WITH CLOUDI - UNIFIED GUARDIAN SYSTEM")
-    print("=" * 65)
+    from app.safety import get_startup_safety_banner
+    print(get_startup_safety_banner())
     print(" [✓] Duplicate Protection : ACTIVE (Single Instance Enforced)")
-    print(" [✓] Safe Trading Mode     : DRY RUN ONLY (No real order placed)")
     print(" [✓] Auto-Recovery        : ACTIVE (Self-Healing Watchdogs)")
     print(" [✓] Telegram Alerts      : CONFIGURED (Notifies on drop/stale)")
-    print("=" * 65)
+    print("=" * 68)
 
     try:
         from app.notifier import send_bot_online_alert
-        send_bot_online_alert(mode="DEMO" if config.USE_DEMO else "LIVE")
+        from app.safety import validate_environment
+        s_report = validate_environment()
+        send_bot_online_alert(
+            mode=s_report.environment,
+            execution_enabled=s_report.execution_enabled,
+            identity_verified=s_report.account_verified,
+        )
     except Exception as se:
         clog.warning(f"Telegram startup alert error: {se}")
 
@@ -261,8 +266,8 @@ def main():
     threading.Thread(target=run_scanner_worker, daemon=True, name="ScannerThread").start()
     time.sleep(1)
 
-    # 3. Start Trader Engine (Auto-Recovering, Safe DRY Mode)
-    print("[3/4] Starting Trader Engine (Safe DRY Mode)...")
+    # 3. Start Trader Engine (Execution Disabled - Safe Mode)
+    print("[3/4] Starting Trader Engine (Execution Disabled - Safe Mode)...")
     threading.Thread(target=run_trader_worker, daemon=True, name="TraderThread").start()
     time.sleep(1)
 

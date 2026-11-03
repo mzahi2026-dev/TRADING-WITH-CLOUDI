@@ -11,10 +11,14 @@ from app.trade_log import log
 
 if __name__ == "__main__":
     if "--check" in sys.argv:
-        Engine(dry=False).check()
+        Engine(dry=True).check()
         sys.exit(0)
 
-    dry = "--dry" in sys.argv
+    # Fail-closed: default to execution disabled (dry=True)
+    dry = True
+    if "--live-orders" in sys.argv:
+        dry = False
+
     eng = Engine(dry=dry)
     eng.startup()
 

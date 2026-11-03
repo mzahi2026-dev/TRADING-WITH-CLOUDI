@@ -5,6 +5,22 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+# ---- Bybit V5 USDT Linear Perpetual Futures (Target Architecture) ----
+from .safety import (
+    BYBIT_DEMO_REST_URL,
+    BYBIT_DEMO_PRIVATE_WS_URL,
+    BYBIT_PUBLIC_LINEAR_WS_URL,
+    validate_environment,
+    assert_execution_allowed,
+    SafetyViolationError,
+)
+
+BYBIT_REST_BASE = os.getenv("BYBIT_REST_URL", BYBIT_DEMO_REST_URL)
+BYBIT_PRIVATE_WS_BASE = os.getenv("BYBIT_PRIVATE_WS_URL", BYBIT_DEMO_PRIVATE_WS_URL)
+BYBIT_PUBLIC_WS_BASE = os.getenv("BYBIT_PUBLIC_LINEAR_WS_URL", BYBIT_PUBLIC_LINEAR_WS_URL)
+BYBIT_API_KEY = os.getenv("BYBIT_DEMO_API_KEY", "")
+BYBIT_API_SECRET = os.getenv("BYBIT_DEMO_API_SECRET", "")
+
 # ---- Binance USDS-M Futures ----
 USE_DEMO = os.getenv("USE_DEMO", "true").lower() in ("true", "1", "yes")
 

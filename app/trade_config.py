@@ -1,4 +1,10 @@
-DEMO_BASE = "https://demo-fapi.binance.com"   # shudhu demo, real account e order jabe na
+from .safety import BYBIT_DEMO_REST_URL
+
+# Target Architecture: Bybit V5 Demo
+BYBIT_DEMO_BASE = BYBIT_DEMO_REST_URL
+
+# Legacy Binance demo base (retained for backward compatibility until full adapter migration)
+DEMO_BASE = "https://demo-fapi.binance.com"
 
 NOTIONAL_USDT = 100.0       # proti trade er size
 LEVERAGE = 5

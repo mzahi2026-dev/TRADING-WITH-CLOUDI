@@ -30,10 +30,20 @@ def rt(x, tick):
 
 
 class AIEngine:
-    def __init__(self, dry=False):
+    def __init__(self, dry=True):
+        from .safety import validate_environment, SafetyViolationError
+        # Fail-closed guard: default to execution disabled (dry=True)
+        if dry is False:
+            report = validate_environment()
+            if not report.execution_enabled:
+                log.critical(f"AI Execution BLOCKED by safety guard: {report.summary_message}")
+                raise SafetyViolationError(
+                    f"Fail-closed guard active: {report.summary_message} | "
+                    f"Reasons: {'; '.join(report.block_reasons)}"
+                )
         self.dry = dry
         self.pub = BinanceClient()
-        self.dc = None if dry else DemoClient()
+        self.dc = None if self.dry else DemoClient()
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model_name = getattr(tc, "AI_MODEL", "gemini-3.8-flash")
         self.ensure_schema()

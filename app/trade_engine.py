@@ -41,10 +41,20 @@ def rt(x, tick):
 
 
 class Engine:
-    def __init__(self, dry=False):
+    def __init__(self, dry=True):
+        from .safety import validate_environment, SafetyViolationError
+        # Fail-closed guard: default to execution disabled (dry=True)
+        if dry is False:
+            report = validate_environment()
+            if not report.execution_enabled:
+                log.critical(f"Execution BLOCKED by safety guard: {report.summary_message}")
+                raise SafetyViolationError(
+                    f"Fail-closed guard active: {report.summary_message} | "
+                    f"Reasons: {'; '.join(report.block_reasons)}"
+                )
         self.dry = dry
         self.pub = BinanceClient()
-        self.dc = None if dry else DemoClient()
+        self.dc = None if self.dry else DemoClient()
         self.lock = threading.Lock()
         self.lev_set = set()
         con = self.db()
@@ -90,7 +100,13 @@ class Engine:
 
     # ------------------------------------------------------------ check / startup
     def check(self):
-        print("Demo base      :", tc.DEMO_BASE)
+        print("Demo base      :", getattr(tc, "BYBIT_DEMO_BASE", tc.DEMO_BASE))
+        if not self.dc:
+            print("Order execution: DISABLED (Dry/Paper Mode - Fail-Closed Safety Active)")
+            bid, ask = self.book("BTCUSDT")
+            print(f"Public depth   : BTCUSDT bid {bid} ask {ask}")
+            print("OK. Public connection verified, order execution disabled.")
+            return
         print("Time offset ms :", self.dc.offset)
         av, bal = self.dc.balance()
         print(f"USDT balance   : {bal:.2f} (available {av:.2f})")
@@ -103,7 +119,7 @@ class Engine:
         print("OK. Key + demo connection thik ache.")
 
     def startup(self):
-        mode = "DRY (order hobe na)" if self.dry else "DEMO ORDER"
+        mode = "DRY RUN (Execution DISABLED - Safe Mode)" if self.dry else "LIVE ORDERS ENABLED"
         log.info(f"Trader start | mode={mode} | {tc.NOTIONAL_USDT} USDT x{tc.LEVERAGE} | "
                  f"max {tc.MAX_OPEN} | SL {tc.SL_ATR} ATR / TP {tc.TP_ATR} ATR")
         if not self.dry:
