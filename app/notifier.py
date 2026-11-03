@@ -155,6 +155,25 @@ def send_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, 
     return send_alert(msg, parse_mode="HTML")
 
 
+def _parse_closed_ts(closed_val, fallback_dt: datetime) -> int:
+    """Parse positions.closed string/int to epoch ms for accurate 1-hour filtering."""
+    if not closed_val:
+        return 0
+    if isinstance(closed_val, (int, float)):
+        return int(closed_val) if closed_val > 1e11 else int(closed_val * 1000)
+    s = str(closed_val).strip()
+    if s.isdigit():
+        val = int(s)
+        return val if val > 1e11 else val * 1000
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
+        try:
+            dt = datetime.strptime(s, fmt).replace(tzinfo=BDT)
+            return int(dt.timestamp() * 1000)
+        except ValueError:
+            continue
+    return 0
+
+
 def send_hourly_report():
     """Compiles and sends clean Hourly Trading Report to Telegram matching user card format."""
     if not BOT_TOKEN or not CHAT_ID:
@@ -170,19 +189,34 @@ def send_hourly_report():
     ref_no = f"REP-{now_dt.strftime('%m%d')}-{now_dt.strftime('%H%M')}"
 
     dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
-    mode_str = "DRY" if dry_mode else "DEMO"
+    mode_str = "DRY RUN" if dry_mode else ("DEMO" if getattr(config, "USE_DEMO", True) else "LIVE")
 
     con = sqlite3.connect(str(config.DB_PATH), timeout=20)
     con.row_factory = sqlite3.Row
 
-    # 1. Closed Trades in last 24h
+    # 1. Closed Trades in last 24h & last 1h
     has_pos = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='positions'").fetchone()
     day_ago = int(time.time() * 1000) - 24 * 3600 * 1000
+    hour_ago = int(time.time() * 1000) - 3600 * 1000
 
     closed_rows = con.execute(
-        "SELECT pnl, fee, result FROM positions WHERE status='CLOSED' AND entry_ms>=?", (day_ago,)
+        "SELECT pnl, fee, result, closed, entry_ms FROM positions WHERE status='CLOSED' AND entry_ms>=?", (day_ago,)
     ).fetchall() if has_pos else []
 
+    # Last 1-hour subset
+    hour_rows = [
+        r for r in closed_rows
+        if _parse_closed_ts(r["closed"], now_dt) >= hour_ago or (not r["closed"] and (r["entry_ms"] or 0) >= hour_ago)
+    ]
+    h_trades = len(hour_rows)
+    h_wins = sum(1 for r in hour_rows if float(r["pnl"] or 0) > 0)
+    h_losses = sum(1 for r in hour_rows if float(r["pnl"] or 0) <= 0)
+    h_pnl = sum(float(r["pnl"] or 0) for r in hour_rows)
+    h_fees = sum(float(r["fee"] or 0) for r in hour_rows)
+    h_sign = "+" if h_pnl > 0 else ""
+    h_heart = "💚" if h_pnl >= 0 else "💔"
+
+    # 24h overall totals
     total_trades = len(closed_rows)
     wins = sum(1 for r in closed_rows if float(r["pnl"] or 0) > 0)
     losses = sum(1 for r in closed_rows if float(r["pnl"] or 0) <= 0)
@@ -214,14 +248,27 @@ def send_hourly_report():
         f"📅 <b>{day_date}</b> | <b>Ref:</b> <code>#{ref_no}</code>",
         f"🟢 <b>Bot:</b> ACTIVE | 🧪 <b>{mode_str}</b>",
         "",
-        f"📈 <b>Trades:</b> {total_trades:02d}",
-        f"✅ <b>Wins:</b> {wins:02d} | ❌ <b>Losses:</b> {losses:02d}",
-        f"🎯 <b>Win Rate:</b> {win_rate:.1f}%",
-        "",
-        f"{pnl_heart} <b>Net PnL:</b> {pnl_sign}{net_pnl:.2f} USDT",
-        f"💸 <b>Fees:</b> {total_fees:.2f} USDT",
-        f"📁 <b>Open Positions:</b> {len(open_pos):02d}",
+        f"⚡ <b>Last 1 Hour ({time_window}):</b>",
     ]
+
+    if h_trades > 0:
+        msg.extend([
+            f"• <b>Trades:</b> {h_trades:02d} (✅ {h_wins:02d} | ❌ {h_losses:02d})",
+            f"• {h_heart} <b>Hourly Net PnL:</b> {h_sign}{h_pnl:.2f} USDT (Fees: {h_fees:.2f} USDT)",
+        ])
+    else:
+        msg.append("• <i>No trades closed in this 1-hour window</i>")
+
+    msg.extend([
+        "",
+        "🗓️ <b>24h Overall Summary:</b>",
+        f"• <b>Total Trades:</b> {total_trades:02d} (✅ {wins:02d} | ❌ {losses:02d})",
+        f"• <b>Win Rate:</b> {win_rate:.1f}%",
+        f"• {pnl_heart} <b>Net PnL:</b> {pnl_sign}{net_pnl:.2f} USDT",
+        f"• 💸 <b>Fees:</b> {total_fees:.2f} USDT",
+        "",
+        f"📁 <b>Open Positions:</b> {len(open_pos):02d}",
+    ])
 
     if open_pos:
         msg.append("\n<b>Active Trades:</b>")
@@ -236,4 +283,3 @@ def send_hourly_report():
     msg.append(f"🤖 <b>Next Report:</b> {next_report}")
 
     return send_alert("\n".join(msg), parse_mode="HTML")
-
