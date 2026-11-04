@@ -104,7 +104,8 @@ class Engine:
 
     def startup(self):
         mode = "DRY (order hobe na)" if self.dry else "DEMO ORDER"
-        log.info(f"Trader start | mode={mode} | {tc.NOTIONAL_USDT} USDT x{tc.LEVERAGE} | "
+        target_risk = getattr(tc, "TARGET_RISK_USDT", 15.0)
+        log.info(f"Trader start | mode={mode} | Risk ${target_risk} USDT x{tc.LEVERAGE} | "
                  f"max {tc.MAX_OPEN} | SL {tc.SL_ATR} ATR / TP {tc.TP_ATR} ATR")
         if not self.dry:
             if self.dc.dual_mode():
@@ -325,7 +326,19 @@ class Engine:
         tick, step, minq, minn = [Decimal(str(x)) for x in info]
         if tick <= 0 or step <= 0:
             return False, "bad tick/step"
-        q = Decimal(str(tc.NOTIONAL_USDT)) / Decimal(str(mid))
+        # Dynamic Risk Sizing: Target $15 USDT risk on Stop Loss (1.5 * ATR)
+        risk_usdt = Decimal(str(getattr(tc, "TARGET_RISK_USDT", 15.0)))
+        sl_dist = Decimal(str(tc.SL_ATR)) * Decimal(str(atr))
+        if sl_dist > 0:
+            q = risk_usdt / sl_dist
+        else:
+            q = Decimal(str(tc.NOTIONAL_USDT)) / Decimal(str(mid))
+
+        # Enforce max notional cap for portfolio protection
+        max_notional = Decimal(str(getattr(tc, "MAX_NOTIONAL_USDT", 800.0)))
+        if q * Decimal(str(mid)) > max_notional:
+            q = max_notional / Decimal(str(mid))
+
         q = (q / step).to_integral_value(rounding=ROUND_DOWN) * step
         if q < minq or q * Decimal(str(mid)) < max(minn, Decimal("5")):
             return False, f"qty {q} choto (min qty {minq}, min notional {minn})"

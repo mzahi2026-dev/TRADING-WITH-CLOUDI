@@ -1,6 +1,9 @@
 DEMO_BASE = "https://demo-fapi.binance.com"   # shudhu demo, real account e order jabe na
 
-NOTIONAL_USDT = 100.0       # proti trade er size
+# Risk & Position Sizing
+TARGET_RISK_USDT = 15.0       # proti trade e target risk $15 USDT (0.30% of $5,000 capital)
+MAX_NOTIONAL_USDT = 800.0     # max position notional size cap (5x leverage = max $160 margin)
+NOTIONAL_USDT = 100.0         # fallback notional size
 LEVERAGE = 5
 MAX_OPEN = 5
 SL_ATR = 1.5
