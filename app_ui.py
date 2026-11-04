@@ -40,6 +40,10 @@ def db():
     return get_db()
 
 
+def market_db():
+    return sqlite3.connect(str(config.DB_PATH), timeout=30)
+
+
 def has_table(con, name):
     r = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
     return r is not None
@@ -90,7 +94,7 @@ def candles(symbol: str, interval: str = "15m", limit: int = 600):
     if interval not in config.INTERVALS:
         raise HTTPException(400, "bad interval")
     symbol = symbol.upper()
-    con = db()
+    con = market_db()
     df = pd.read_sql_query(
         "SELECT open_time, open, high, low, close, volume FROM klines "
         "WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?",
@@ -195,7 +199,7 @@ def get_analysis(symbol: str, interval: str = "15m"):
     from app.strategies import prep, evaluate
     from app import trade_config as tc
     symbol = symbol.upper()
-    con = db()
+    con = market_db()
     df = pd.read_sql_query(
         "SELECT open_time, open, high, low, close, volume, taker_buy_base FROM klines "
         "WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT 150",
@@ -280,7 +284,7 @@ def get_analysis(symbol: str, interval: str = "15m"):
 # ------------------------------------------------------------------ watch / signals
 @app.get("/api/watch")
 def watch():
-    con = db()
+    con = market_db()
     out = {"watch": [], "rank": [], "universe": [], "scan_date": None, "run_hour": None}
     if has_table(con, "universe"):
         out["universe"] = [r[0] for r in con.execute("SELECT symbol FROM universe ORDER BY symbol")]
@@ -549,7 +553,7 @@ def pct_status(p):
 
 @app.get("/api/health")
 def health():
-    con = db()
+    con = market_db()
     now = time.time()
     items = []
     universe = [r[0] for r in con.execute("SELECT symbol FROM universe")] if has_table(con, "universe") else []
@@ -703,7 +707,7 @@ def fix(action: str, request: Request):
                 from app.extra import job_hourly, job_fast
                 c = BinanceClient()
                 s = Storage()
-                con = db()
+                con = market_db()
                 syms = [r[0] for r in con.execute("SELECT symbol FROM universe")] if has_table(con, "universe") else []
                 con.close()
                 if syms:
@@ -715,7 +719,7 @@ def fix(action: str, request: Request):
                 from app.collector import backfill_symbols, fetch_universe
                 c = BinanceClient()
                 s = Storage()
-                con = db()
+                con = market_db()
                 syms = [r[0] for r in con.execute("SELECT symbol FROM universe")] if has_table(con, "universe") else []
                 con.close()
                 if not syms:
