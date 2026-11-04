@@ -36,7 +36,8 @@ def check_auth(request: Request):
 
 
 def db():
-    return sqlite3.connect(str(config.DB_PATH), timeout=30)
+    from app.db import get_db
+    return get_db()
 
 
 def has_table(con, name):

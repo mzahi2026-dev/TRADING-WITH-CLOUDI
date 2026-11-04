@@ -226,8 +226,8 @@ def send_hourly_report():
     dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
     mode_str = "DRY RUN" if dry_mode else ("DEMO" if getattr(config, "USE_DEMO", True) else "LIVE")
 
-    con = sqlite3.connect(str(config.DB_PATH), timeout=20)
-    con.row_factory = sqlite3.Row
+    from .db import get_db
+    con = get_db()
 
     # 1. Closed Trades in last 24h & last 1h
     has_pos = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='positions'").fetchone()

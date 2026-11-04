@@ -63,7 +63,8 @@ class Engine:
         con.close()
 
     def db(self):
-        return sqlite3.connect(str(config.DB_PATH), timeout=30)
+        from .db import get_db
+        return get_db()
 
     # ------------------------------------------------------------ helpers
     def book(self, sym):

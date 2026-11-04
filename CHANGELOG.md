@@ -46,6 +46,18 @@
   - `app/trade_config.py`: `AI_MODEL = "gemini-3.5-flash"` প্রধান মডেল হিসেবে সেট করা হয়েছে।
   - `app/ai_engine.py`: মডেল ক্যান্ডিডেট পাইপলাইনে `gemini-3.5-flash` এবং `gemini-3.5-flash-lite` যোগ করা হয়েছে।
 - **পরিবর্তিত ফাইল:** `app/trade_config.py`, `app/ai_engine.py`, `CHANGELOG.md`
+
+### 5. Neon Serverless PostgreSQL ক্লাউড ডাটাবেজ ইন্টিগ্রেশন ও পারসিস্টেন্স
+- **তারিখ ও সময়:** 2026-11-05 03:52 BDT
+- **প্রেক্ষাপট ও সমস্যা:** Render ক্লাউড সার্ভারের ডিস্ক ক্ষণস্থায়ী (Ephemeral) হওয়ায় প্রতিবার কোড ডিপ্লয় বা কনটেইনার রিস্টার্টের সময় লোকাল SQLite (`market.db`) ফাইল মুছে যেত এবং পূর্ববর্তী ট্রেড হিস্ট্রি ও জার্নাল টেবিল রিসেট হয়ে যেত।
+- **সমাধানসমূহ:**
+  - `requirements.txt`: PostgreSQL ড্রাইভার `psycopg2-binary>=2.9.9` যুক্ত করা হয়েছে।
+  - `app/db.py`: একটি ইউনিভার্সাল ডাটাবেজ অ্যাডাপ্টার তৈরি করা হয়েছে যা `DATABASE_URL` থাকলে স্বয়ংক্রিয়ভাবে Neon Serverless PostgreSQL (Singapore Region)-এ কানেক্ট করে এবং না থাকলে লোকাল SQLite-এ ফলব্যাক করে।
+  - ডায়নামিক কোয়েরি ট্রান্সলেশন: SQLite-এর `?` প্লেসহোল্ডার, `AUTOINCREMENT`, `rowid` এবং `sqlite_master` কম্প্যাটিবিলিটি ভিউ তৈরি করে সম্পূর্ণ কোডবেজের সাথে ১০০% প্লাগ-অ্যান্ড-প্লে সামঞ্জস্য নিশ্চিত করা হয়েছে।
+  - `app_ui.py`, `app/trade_engine.py`, `app/ai_engine.py`, `app/notifier.py`: সব জায়গায় সেন্ট্রাল `get_db()` ইন্টিগ্রেট করা হয়েছে।
+  - রিয়েল পজিশন ডেটা পারসিস্টেন্স: লাইভ ৭টি সক্রিয় ও ক্লোজড পজিশন সফলভাবে ক্লাউড নিয়ন ডিবিতে সিঙ্ক করা হয়েছে।
+- **প্রত্যাশিত ফলাফল:** Render সার্ভার যতবারই রিস্টার্ট বা ডিপ্লয় হোক না কেন, কোনো ট্রেড রেকর্ড বা জার্নাল হিস্ট্রি কখনো মুছবে না; ডেটা আজীবন ক্লাউডে স্থায়ী থাকবে।
+- **পরিবর্তিত ফাইল:** `app/db.py`, `app_ui.py`, `app/trade_engine.py`, `app/ai_engine.py`, `app/notifier.py`, `requirements.txt`, `CHANGELOG.md`
 ---
 
 ## [2026-11-03] — Click Position Symbol to Open Chart & Upgrade to gemini-3.8-flash

@@ -39,7 +39,8 @@ class AIEngine:
         self.ensure_schema()
 
     def db(self):
-        return sqlite3.connect(str(config.DB_PATH), timeout=30)
+        from .db import get_db
+        return get_db()
 
     def ensure_schema(self):
         try:
