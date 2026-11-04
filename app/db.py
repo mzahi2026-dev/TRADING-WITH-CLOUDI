@@ -6,7 +6,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+NEON_DEFAULT_URL = "postgresql://neondb_owner:npg_k9Bftzpl4Ujc@ep-square-lake-azznmcx3-pooler.c-3.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
+DATABASE_URL = os.getenv("DATABASE_URL", NEON_DEFAULT_URL).strip()
 
 if DATABASE_URL:
     import psycopg2
