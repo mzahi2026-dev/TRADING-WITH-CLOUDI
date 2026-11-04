@@ -102,46 +102,66 @@ class AIEngine:
         return None
 
     def call_gemini(self, prompt: str) -> dict:
-        """Call Gemini API via google-genai SDK with structured output or fallback."""
+        """Call Gemini API via google-genai SDK with multi-model fallback and quota guard."""
         if not self.api_key:
             log.warning("GEMINI_API_KEY missing in .env. Skipping AI market scan.")
             return {}
 
-        try:
-            from google import genai
-            from google.genai import types
+        now = time.time()
+        if hasattr(self, "_quota_pause_until") and now < self._quota_pause_until:
+            rem = int(self._quota_pause_until - now) // 60
+            log.info(f"AI Engine: Gemini API paused due to daily quota limit ({rem}m remaining). Skipping call.")
+            return {}
 
-            client = genai.Client(api_key=self.api_key)
-            # Request JSON structured output
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2,
-                ),
-            )
-            raw_text = response.text or ""
-            return json.loads(raw_text)
-        except Exception as e:
-            # Try fallback to gemini-2.5-flash or gemini-3.8-flash
+        primary_model = getattr(tc, "AI_MODEL", "gemini-2.5-flash")
+        candidates = [primary_model]
+        for fb in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
+            if fb not in candidates:
+                candidates.append(fb)
+
+        for model_candidate in candidates:
             try:
                 from google import genai
+                from google.genai import types
+
                 client = genai.Client(api_key=self.api_key)
                 response = client.models.generate_content(
-                    model="gemini-3.8-flash",
+                    model=model_candidate,
                     contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2,
+                    ),
                 )
-                txt = response.text or ""
-                # Strip markdown code blocks if any
-                if "```json" in txt:
-                    txt = txt.split("```json")[1].split("```")[0].strip()
-                elif "```" in txt:
-                    txt = txt.split("```")[1].split("```")[0].strip()
-                return json.loads(txt)
-            except Exception as e2:
-                log.error(f"Gemini API call failed: {e} | fallback: {e2}")
-                return {}
+                raw_text = response.text or ""
+                if "```json" in raw_text:
+                    raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+                elif "```" in raw_text:
+                    raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                return json.loads(raw_text)
+            except Exception as e:
+                err_str = str(e)
+                is_quota = "429" in err_str or "RESOURCE_EXHAUSTED" in err_str or "quota" in err_str.lower()
+                log.warning(f"AI Engine: Model {model_candidate} call failed: {e}")
+                if not is_quota:
+                    break
+                continue
+
+        # All model candidates exhausted due to quota limit:
+        self._quota_pause_until = now + 3600
+        log.error("AI Engine: All Gemini models exceeded quota (429 RESOURCE_EXHAUSTED). Pausing AI calls for 60m.")
+        try:
+            from .notifier import send_watchdog_alert
+            send_watchdog_alert(
+                title="Gemini AI Quota Limit Reached",
+                component="AI Autonomous Engine",
+                issue="Gemini API returned 429 RESOURCE_EXHAUSTED (Free Tier daily request limit reached).",
+                action="AI Engine temporarily paused for 60m to prevent log spam. Rule Engine continues trading normally.",
+                severity="WARNING"
+            )
+        except Exception as ne:
+            log.warning(f"Failed to send watchdog alert: {ne}")
+        return {}
 
     def cycle(self):
         """15m AI cycle: evaluate candidates, generate autonomous setup, execute order."""

@@ -387,11 +387,32 @@ class Engine:
         tp = rt(entry + k * tc.TP_ATR * atr, tick)
         if not self.try_cond(sym, cs, "STOP_MARKET", sl):
             log.error(f"{sym}: SL boshate parlam na! Attempting emergency close...")
+            try:
+                from .notifier import send_watchdog_alert
+            except Exception:
+                send_watchdog_alert = None
+
             if self.emergency_close(sym, side, amt):
                 log.info(f"{sym}: Position successfully closed due to SL failure")
+                if send_watchdog_alert:
+                    send_watchdog_alert(
+                        title="Emergency Close Executed",
+                        component=f"Trader Engine ({sym})",
+                        issue=f"Conditional Stop Loss order at {sl} was rejected by exchange.",
+                        action=f"Position ({amt} {sym}) immediately closed via Market order for capital safety.",
+                        severity="WARNING"
+                    )
                 return False, "SL order fail, position emergency close kora holo"
             else:
                 log.critical(f"{sym}: EMERGENCY CLOSE FAILED! Position is OPEN without SL! Tracking as EMERGENCY_UNPROTECTED")
+                if send_watchdog_alert:
+                    send_watchdog_alert(
+                        title="CRITICAL: UNPROTECTED POSITION",
+                        component=f"Trader Engine ({sym})",
+                        issue=f"Failed to place Stop Loss AND Emergency Close failed! Position {amt} {sym} is OPEN with NO PROTECTION!",
+                        action="Tracked as EMERGENCY_UNPROTECTED. Immediate review or next reconcile cycle required!",
+                        severity="CRITICAL"
+                    )
                 con = self.db()
                 con.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
                             "VALUES (?,?,?,?,?,?,?,?,'EMERGENCY_UNPROTECTED',?)",

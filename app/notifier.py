@@ -61,6 +61,41 @@ def send_bot_online_alert(mode: str = "DEMO"):
     return send_alert(msg, parse_mode="HTML")
 
 
+def send_watchdog_alert(title: str, component: str, issue: str, action: str = "", severity: str = "WARNING"):
+    """Sends standardized Watchdog health alert to Telegram."""
+    if not BOT_TOKEN or not CHAT_ID:
+        return False
+
+    icon_map = {
+        "CRITICAL": "🚨",
+        "WARNING": "⚠️",
+        "INFO": "ℹ️",
+        "RESOLVED": "✅",
+    }
+    icon = icon_map.get(severity.upper(), "⚠️")
+    now_dt = datetime.now(BDT)
+    day_date, time_str, full_str = format_dt(now_dt)
+
+    msg = [
+        f"{icon} <b>WATCHDOG GUARDIAN ALERT</b>",
+        "─────────────",
+        f"🏷️ <b>Event:</b> {title}",
+        f"⚙️ <b>Component:</b> <code>{component}</code>",
+        f"🔥 <b>Severity:</b> <b>{severity.upper()}</b>",
+        f"⏱️ <b>Time:</b> {time_str} BDT",
+        "",
+        f"📝 <b>Issue:</b> {issue}",
+    ]
+    if action:
+        msg.extend([
+            "",
+            f"🛠️ <b>Action:</b> {action}",
+        ])
+    msg.append("─────────────")
+
+    return send_alert("\n".join(msg), parse_mode="HTML")
+
+
 def send_trade_opened_alert(pid: int, sym: str, side: str, strat: str, entry, sl, tp, dry: bool = False):
     """Alert on trade open matching card format with Day, Date, Time and Ref No."""
     now_dt = datetime.now(BDT)

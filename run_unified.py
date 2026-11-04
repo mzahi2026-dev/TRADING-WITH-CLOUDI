@@ -190,6 +190,14 @@ def run_trader_worker():
             time.sleep(15)
 
 
+# Track background workers for Watchdog supervision
+worker_threads = {
+    "collector": None,
+    "scanner": None,
+    "trader": None,
+}
+
+
 def start_collector_thread():
     """Run async collector in background thread with auto-supervision and Telegram alert."""
     def _run():
@@ -203,34 +211,151 @@ def start_collector_thread():
             except Exception as e:
                 crash_count += 1
                 clog.critical(f"Collector thread exception: {e!r}")
-                send_alert(f"⚠️ *Collector Alert*\nWebSocket Collector dropped: `{e!r}`\nAuto-restarting attempt #{crash_count}...")
+                try:
+                    from app.notifier import send_watchdog_alert
+                    send_watchdog_alert(
+                        title="WebSocket Collector Disconnected",
+                        component="Data Pipeline (WebSocket Collector)",
+                        issue=f"WebSocket collector stream dropped: {e!r}",
+                        action=f"Auto-restarting stream attempt #{crash_count}...",
+                        severity="WARNING"
+                    )
+                except Exception:
+                    send_alert(f"⚠️ *Collector Alert*\nWebSocket Collector dropped: `{e!r}`\nAuto-restarting attempt #{crash_count}...")
             finally:
                 loop.close()
             time.sleep(5)
 
     t = threading.Thread(target=_run, daemon=True, name="CollectorSupervisionThread")
     t.start()
+    worker_threads["collector"] = t
+    return t
+
+
+def start_scanner_thread():
+    """Start scanner and ranker worker thread supervised by Watchdog."""
+    t = threading.Thread(target=run_scanner_worker, daemon=True, name="ScannerThread")
+    t.start()
+    worker_threads["scanner"] = t
+    return t
+
+
+def start_trader_thread():
+    """Start trader engine worker thread supervised by Watchdog."""
+    t = threading.Thread(target=run_trader_worker, daemon=True, name="TraderThread")
+    t.start()
+    worker_threads["trader"] = t
+    return t
 
 
 def start_health_monitor():
-    """Monitor data freshness every 10 minutes and alert if data becomes stale."""
-    def _monitor():
+    """Unified Watchdog Guardian: Continuous supervision of threads, kline freshness, and trade safety."""
+    def _watchdog_loop():
+        alert_cooldowns = {}
+        stale_alerted = False
+
         while True:
-            time.sleep(600)  # every 10 min
+            time.sleep(30)  # Check every 30 seconds
+            now = time.time()
+
+            def should_alert(key: str, cooldown_secs: int = 1800) -> bool:
+                last = alert_cooldowns.get(key, 0)
+                if now - last >= cooldown_secs:
+                    alert_cooldowns[key] = now
+                    return True
+                return False
+
+            try:
+                from app.notifier import send_watchdog_alert
+            except Exception:
+                send_watchdog_alert = None
+
+            # 1. Thread Liveness Check
+            if worker_threads.get("collector") and not worker_threads["collector"].is_alive():
+                clog.critical("Watchdog: CollectorSupervisionThread died! Auto-restarting...")
+                start_collector_thread()
+                if send_watchdog_alert and should_alert("thread_collector", 600):
+                    send_watchdog_alert(
+                        title="Collector Thread Crash",
+                        component="Data Pipeline",
+                        issue="WebSocket Collector supervision thread died unexpectedly.",
+                        action="Thread auto-restarted by Watchdog.",
+                        severity="CRITICAL"
+                    )
+
+            if worker_threads.get("scanner") and not worker_threads["scanner"].is_alive():
+                clog.critical("Watchdog: ScannerThread died! Auto-restarting...")
+                start_scanner_thread()
+                if send_watchdog_alert and should_alert("thread_scanner", 600):
+                    send_watchdog_alert(
+                        title="Scanner Thread Crash",
+                        component="Scanner & Hourly Ranker",
+                        issue="Scanner scheduler thread died unexpectedly.",
+                        action="Thread auto-restarted by Watchdog.",
+                        severity="CRITICAL"
+                    )
+
+            if worker_threads.get("trader") and not worker_threads["trader"].is_alive():
+                clog.critical("Watchdog: TraderThread died! Auto-restarting...")
+                start_trader_thread()
+                if send_watchdog_alert and should_alert("thread_trader", 600):
+                    send_watchdog_alert(
+                        title="Trader Engine Thread Crash",
+                        component="Trade Engine",
+                        issue="Trader execution thread died unexpectedly.",
+                        action="Thread auto-restarted by Watchdog.",
+                        severity="CRITICAL"
+                    )
+
+            # 2. Market Data Freshness Check
             try:
                 con = Storage().conn
-                now = time.time()
-                # Check 15m kline freshness
                 r = con.execute("SELECT MAX(open_time) FROM klines WHERE interval='15m'").fetchone()
                 if r and r[0]:
                     age_min = (now * 1000 - r[0]) / 60000
-                    if age_min > 45:
-                        send_alert(f"⚠️ *Data Stale Alert*\n15m candle delay is {int(age_min)} minutes! Collector might be stalled.")
-            except Exception:
-                pass
+                    if age_min > 25:
+                        if send_watchdog_alert and should_alert("kline_stale", 1800):
+                            send_watchdog_alert(
+                                title="Market Data Delay Detected",
+                                component="Klines Pipeline",
+                                issue=f"Latest 15m candle delay is {int(age_min)} minutes. Data stream may be lagging.",
+                                action="Supervising WebSocket streams.",
+                                severity="WARNING"
+                            )
+                            stale_alerted = True
+                    elif stale_alerted and age_min <= 18:
+                        stale_alerted = False
+                        if send_watchdog_alert:
+                            send_watchdog_alert(
+                                title="Market Data Pipeline Restored",
+                                component="Klines Pipeline",
+                                issue=f"Fresh 15m candles arriving normally (delay: {int(age_min)}m).",
+                                action="Pipeline healthy.",
+                                severity="RESOLVED"
+                            )
 
-    t = threading.Thread(target=_monitor, daemon=True, name="HealthMonitorThread")
+                # 3. Emergency Unprotected Positions Check
+                has_pos_tbl = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='positions'").fetchone()
+                if has_pos_tbl:
+                    unprot = con.execute(
+                        "SELECT id, symbol, side, qty FROM positions WHERE status='EMERGENCY_UNPROTECTED'"
+                    ).fetchall()
+                    if unprot and send_watchdog_alert and should_alert("unprotected_pos", 900):
+                        syms = ", ".join(f"{p[1]} ({p[2]})" for p in unprot)
+                        send_watchdog_alert(
+                            title="CRITICAL: Unprotected Position Detected",
+                            component="Position Protection",
+                            issue=f"Positions {syms} are OPEN without Stop Loss order protection!",
+                            action="Watchdog flagging for emergency reconciliation.",
+                            severity="CRITICAL"
+                        )
+                con.close()
+            except Exception as dbe:
+                clog.warning(f"Watchdog database check error: {dbe}")
+
+    t = threading.Thread(target=_watchdog_loop, daemon=True, name="UnifiedWatchdogThread")
     t.start()
+    return t
 
 
 def main():
@@ -258,12 +383,12 @@ def main():
 
     # 2. Start Scanner & Hourly Ranker (Auto-Recovering)
     print("[2/4] Starting Daily Scanner & Hourly Ranker Scheduler...")
-    threading.Thread(target=run_scanner_worker, daemon=True, name="ScannerThread").start()
+    start_scanner_thread()
     time.sleep(1)
 
     # 3. Start Trader Engine (Auto-Recovering, Safe DRY Mode)
     print("[3/4] Starting Trader Engine (Safe DRY Mode)...")
-    threading.Thread(target=run_trader_worker, daemon=True, name="TraderThread").start()
+    start_trader_thread()
     time.sleep(1)
 
     # 4. Start Health Monitor Watchdog
