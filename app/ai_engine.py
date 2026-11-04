@@ -113,9 +113,9 @@ class AIEngine:
             log.info(f"AI Engine: Gemini API paused due to daily quota limit ({rem}m remaining). Skipping call.")
             return {}
 
-        primary_model = getattr(tc, "AI_MODEL", "gemini-2.5-flash")
+        primary_model = getattr(tc, "AI_MODEL", "gemini-3.5-flash")
         candidates = [primary_model]
-        for fb in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
+        for fb in ("gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-flash-lite-latest", "gemini-3.8-flash"):
             if fb not in candidates:
                 candidates.append(fb)
 

@@ -35,6 +35,17 @@
   - `app/trade_engine.py`: এক্সচেঞ্জ কর্তৃক স্টপ লস অর্ডার রিজেক্ট হলে বা ইমার্জেন্সি ক্লোজ ট্রিগার হলে তাৎক্ষণিক টেলিগ্রাম অ্যালার্ট পাঠানো নিশ্চিত করা হয়েছে।
   - `app/ai_engine.py`: মাল্টি-মডেল ফলব্যাক (`gemini-2.5-flash`, `gemini-2.0-flash`) এবং ৪২৯ কোটা এক্সহস্টেড হ্যান্ডলার যুক্ত করা হয়েছে; কোটা শেষ হলে ৬০ মিনিটের সেফ কুলডাউন পজ এবং টেলিগ্রাম নোটিফিকেশন কার্যকর করা হয়েছে।
 - **পরিবর্তিত ফাইল:** `app/notifier.py`, `app/ai_engine.py`, `app/trade_engine.py`, `run_unified.py`, `CHANGELOG.md`
+
+### 4. Gemini মডেল ভ্যালিডেশন ও gemini-3.5-flash সক্রিয়করণ
+- **তারিখ ও সময়:** 2026-11-05 01:23 BDT
+- **পরীক্ষার ফলাফল:**
+  - `gemini-2.5-flash`: গুগল এপিআই থেকে 404 NOT_FOUND রিটার্ন করেছে (*"This model is no longer available to new users"* - গুগল এটি রিটায়ার করেছে)।
+  - `gemini-3.8-flash`: ফ্রি টিয়ার কোটা লিমিট (২০ রিকোয়েস্ট/দিন) অতিক্রম করে ব্লকড।
+  - `gemini-3.5-flash` এবং `gemini-3.5-flash-lite`: **সরাসরি লাইভ টেস্টে সফল!** ক্রিপ্টো কোয়ান্ট ট্রেডিং অ্যানালাইসিস প্রম্পট পাঠিয়ে বাংলা থিসিস ও JSON রেসপন্স সফলভাবে ভ্যালিডেট করা হয়েছে।
+- **পরিবর্তনসমূহ:**
+  - `app/trade_config.py`: `AI_MODEL = "gemini-3.5-flash"` প্রধান মডেল হিসেবে সেট করা হয়েছে।
+  - `app/ai_engine.py`: মডেল ক্যান্ডিডেট পাইপলাইনে `gemini-3.5-flash` এবং `gemini-3.5-flash-lite` যোগ করা হয়েছে।
+- **পরিবর্তিত ফাইল:** `app/trade_config.py`, `app/ai_engine.py`, `CHANGELOG.md`
 ---
 
 ## [2026-11-03] — Click Position Symbol to Open Chart & Upgrade to gemini-3.8-flash
