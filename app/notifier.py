@@ -1,6 +1,9 @@
+import hashlib
 import os
+import re
 import requests
 import sqlite3
+import threading
 import time
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
@@ -13,6 +16,18 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 BDT = timezone(timedelta(hours=6))
 
+# Anti-Spam & Rate Limiter Configuration
+_ALERT_LOCK = threading.Lock()
+_LAST_SEND_TIME = 0.0
+_RECENT_SEND_TIMES = []
+_ALERT_HISTORY = {}           # sig -> {"last_sent": ts, "suppressed": count}
+_FLOOD_SILENCE_UNTIL = 0.0
+
+MIN_INTERVAL_SECONDS = 2.0    # At least 2 seconds between outgoing Telegram requests
+BURST_WINDOW_SECONDS = 60.0   # Window for burst check
+BURST_MAX_COUNT = 6           # Max 6 messages per 60 seconds
+DEDUP_COOLDOWN_SECONDS = 900  # 15 minutes deduplication cooldown for identical errors
+
 
 def format_dt(dt=None):
     """Returns (day_date_str, time_str, full_str) in BDT."""
@@ -24,23 +39,87 @@ def format_dt(dt=None):
     return day_date, time_str, full_str
 
 
-def send_alert(message: str, force: bool = False, parse_mode: str = "HTML"):
-    """Send alert to Telegram if configured."""
+def _get_message_signature(message: str) -> str:
+    """Generate normalized fingerprint of message by stripping dynamic values (timestamps, numbers, ref numbers)."""
+    cleaned = re.sub(r'<[^>]+>', ' ', message)
+    cleaned = re.sub(r'#[A-Za-z0-9_-]+', '#REF', cleaned)
+    cleaned = re.sub(r'\d{4}-\d{2}-\d{2}', 'DATE', cleaned)
+    cleaned = re.sub(r'\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|BDT)?', 'TIME', cleaned)
+    cleaned = re.sub(r'\d+\.\d+', 'NUM', cleaned)
+    cleaned = re.sub(r'\b\d+\b', 'NUM', cleaned)
+    normalized = " ".join(cleaned.split())
+    return hashlib.md5(normalized.encode('utf-8', errors='ignore')).hexdigest()
+
+
+def send_alert(message: str, force: bool = False, parse_mode: str = "HTML", dedup_window: int = DEDUP_COOLDOWN_SECONDS) -> bool:
+    """Send alert to Telegram with thread-safe rate-limiting and anti-spam deduplication."""
+    global _LAST_SEND_TIME, _RECENT_SEND_TIMES, _FLOOD_SILENCE_UNTIL
+
     if not BOT_TOKEN or not CHAT_ID:
         return False
-    try:
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-        payload = {
-            "chat_id": CHAT_ID,
-            "text": message,
-            "parse_mode": parse_mode,
-            "disable_web_page_preview": True,
-        }
-        r = requests.post(url, json=payload, timeout=10)
-        return r.status_code == 200
-    except Exception as e:
-        print(f"[Telegram Alert Error]: {e}")
-        return False
+
+    now = time.time()
+    sig = _get_message_signature(message)
+
+    with _ALERT_LOCK:
+        # 1. Deduplication Check (for non-force alerts)
+        if not force and dedup_window > 0:
+            hist = _ALERT_HISTORY.get(sig)
+            if hist:
+                time_since = now - hist["last_sent"]
+                if time_since < dedup_window:
+                    hist["suppressed"] += 1
+                    return False
+                else:
+                    suppressed = hist["suppressed"]
+                    if suppressed > 0:
+                        message = f"{message}\n\n<i>(ℹ️ Repeated {suppressed} time{'s' if suppressed > 1 else ''} in the last {int(time_since // 60)}m - throttled)</i>"
+
+        # 2. Flood Guard Check
+        if not force:
+            if now < _FLOOD_SILENCE_UNTIL:
+                return False
+
+            _RECENT_SEND_TIMES = [t for t in _RECENT_SEND_TIMES if now - t <= BURST_WINDOW_SECONDS]
+            if len(_RECENT_SEND_TIMES) >= BURST_MAX_COUNT:
+                _FLOOD_SILENCE_UNTIL = now + 300.0  # Silence non-critical alerts for 5 minutes
+                try:
+                    flood_msg = (
+                        "🔇 <b>Alert Flood Guard Activated</b>\n"
+                        "<i>Too many background alerts in 60 seconds. Notifications are silenced for 5 minutes to prevent spam. Trade executions will still notify.</i>"
+                    )
+                    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+                    requests.post(url, json={"chat_id": CHAT_ID, "text": flood_msg, "parse_mode": "HTML"}, timeout=5)
+                except Exception:
+                    pass
+                return False
+
+        # 3. Minimum Interval Spacing
+        elapsed = now - _LAST_SEND_TIME
+        if elapsed < MIN_INTERVAL_SECONDS:
+            time.sleep(MIN_INTERVAL_SECONDS - elapsed)
+
+        # 4. Perform Request
+        try:
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": CHAT_ID,
+                "text": message,
+                "parse_mode": parse_mode,
+                "disable_web_page_preview": True,
+            }
+            r = requests.post(url, json=payload, timeout=10)
+            sent_ok = r.status_code == 200
+
+            if sent_ok:
+                now_after = time.time()
+                _LAST_SEND_TIME = now_after
+                _RECENT_SEND_TIMES.append(now_after)
+                _ALERT_HISTORY[sig] = {"last_sent": now_after, "suppressed": 0}
+            return sent_ok
+        except Exception as e:
+            print(f"[Telegram Alert Error]: {e}")
+            return False
 
 
 def send_bot_online_alert(mode: str = "DEMO"):
@@ -58,11 +137,11 @@ def send_bot_online_alert(mode: str = "DEMO"):
         f"🧪 <b>Mode:</b> {mode}\n"
         f"📊 <b>Strategy:</b> EMA Pullback & Breakout Retest"
     )
-    return send_alert(msg, parse_mode="HTML")
+    return send_alert(msg, force=True, parse_mode="HTML")
 
 
 def send_watchdog_alert(title: str, component: str, issue: str, action: str = "", severity: str = "WARNING"):
-    """Sends standardized Watchdog health alert to Telegram."""
+    """Sends standardized Watchdog health alert to Telegram with deduplication."""
     if not BOT_TOKEN or not CHAT_ID:
         return False
 
@@ -93,7 +172,8 @@ def send_watchdog_alert(title: str, component: str, issue: str, action: str = ""
         ])
     msg.append("─────────────")
 
-    return send_alert("\n".join(msg), parse_mode="HTML")
+    cooldown = 300 if severity.upper() == "RESOLVED" else 1800  # 30m cooldown for recurring warnings
+    return send_alert("\n".join(msg), parse_mode="HTML", dedup_window=cooldown)
 
 
 def send_trade_opened_alert(pid: int, sym: str, side: str, strat: str, entry, sl, tp, dry: bool = False):
@@ -115,7 +195,7 @@ def send_trade_opened_alert(pid: int, sym: str, side: str, strat: str, entry, sl
         f"📊 <b>Strategy:</b> {strat_clean}\n"
         f"🧪 <b>{mode_str}</b>"
     )
-    return send_alert(msg, parse_mode="HTML")
+    return send_alert(msg, force=True, parse_mode="HTML")
 
 
 def send_ai_trade_opened_alert(pid: int, sym: str, side: str, thesis: str, confidence: int, entry, sl, tp, dry: bool = False):
@@ -141,7 +221,7 @@ def send_ai_trade_opened_alert(pid: int, sym: str, side: str, thesis: str, confi
         f"<i>\"{thesis}\"</i>\n"
         f"🧪 <b>{mode_str}</b>"
     )
-    return send_alert(msg, parse_mode="HTML")
+    return send_alert(msg, force=True, parse_mode="HTML")
 
 
 def send_ai_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, net: float, fee: float, dry: bool = False):
@@ -164,7 +244,7 @@ def send_ai_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, e
         f"{pnl_heart} <b>Net PnL:</b> {pnl_sign}{net:+.4f} USDT\n"
         f"🧪 <b>{mode_str}</b>"
     )
-    return send_alert(msg, parse_mode="HTML")
+    return send_alert(msg, force=True, parse_mode="HTML")
 
 
 def send_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, net: float, fee: float, dry: bool = False):
@@ -187,7 +267,7 @@ def send_trade_closed_alert(pid: int, sym: str, side: str, res: str, entry, ex, 
         f"🏁 <b>Reason:</b> {res}\n"
         f"🧪 <b>{mode_str}</b>"
     )
-    return send_alert(msg, parse_mode="HTML")
+    return send_alert(msg, force=True, parse_mode="HTML")
 
 
 def _parse_closed_ts(closed_val, fallback_dt: datetime) -> int:
@@ -317,4 +397,4 @@ def send_hourly_report():
     msg.append("─────────────")
     msg.append(f"🤖 <b>Next Report:</b> {next_report}")
 
-    return send_alert("\n".join(msg), parse_mode="HTML")
+    return send_alert("\n".join(msg), force=True, parse_mode="HTML")

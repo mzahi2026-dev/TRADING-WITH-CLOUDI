@@ -79,6 +79,7 @@ def release_instance_lock():
 
 def run_scanner_worker():
     """Background scheduler for Scanner (06:02) and Ranker (:12) with auto-recovery."""
+    fail_count = 0
     while True:
         try:
             sched = BackgroundScheduler(timezone="Asia/Dhaka")
@@ -102,6 +103,7 @@ def run_scanner_worker():
                 coalesce=True,
             )
             sched.start()
+            fail_count = 0
             clog.info("Scanner & Ranker Scheduler started (06:02 & :12 BDT)")
 
             # Auto-bootstrap on fresh start or empty database
@@ -137,17 +139,25 @@ def run_scanner_worker():
             while sched.running:
                 time.sleep(30)
         except Exception as e:
-            clog.error(f"Scanner scheduler encountered error: {e}")
-            send_alert(f"⚠️ *Scanner Scheduler Warning*\nError: `{e}`. Auto-recovering in 10s...")
-            time.sleep(10)
+            fail_count += 1
+            clog.error(f"Scanner scheduler encountered error (crash #{fail_count}): {e}")
+            delay = min(300, 10 * (2 ** min(fail_count - 1, 4)))
+            if fail_count == 1 or fail_count % 5 == 0:
+                send_alert(f"⚠️ *Scanner Scheduler Warning*\nError: `{e}`. Auto-recovering in {delay}s...")
+            time.sleep(delay)
 
 
 def run_trader_worker():
     """Background trader scheduler with auto-recovery."""
     dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
+    if not dry_mode and (not os.getenv("DEMO_API_KEY") or not os.getenv("DEMO_API_SECRET")):
+        tlog.warning("DEMO_API_KEY / DEMO_API_SECRET not set in environment! Switching Trader to SAFE DRY MODE.")
+        dry_mode = True
+
     mode_str = "SAFE DRY RUN MODE (Paper)" if dry_mode else "BINANCE DEMO FUTURES (Live Demo Orders)"
     tlog.info(f"Trader Engine starting in {mode_str}")
 
+    fail_count = 0
     while True:
         try:
             eng = Engine(dry=dry_mode)
@@ -180,14 +190,18 @@ def run_trader_worker():
                 coalesce=True,
             )
             sched.start()
+            fail_count = 0
             tlog.info(f"Trader Engine & Gemini AI Engine running | 15m Cycles active (+{tc.CYCLE_SECOND}s / +{tc.CYCLE_SECOND + 10}s)")
 
             while sched.running:
                 time.sleep(30)
         except Exception as e:
-            tlog.critical(f"Trader Engine exception: {e}")
-            send_alert(f"🚨 *Trader Engine Alert*\nError: `{e}`. Auto-recovering trader in 15s...")
-            time.sleep(15)
+            fail_count += 1
+            tlog.critical(f"Trader Engine exception (crash #{fail_count}): {e}")
+            delay = min(300, 15 * (2 ** min(fail_count - 1, 4)))
+            if fail_count == 1 or fail_count % 5 == 0:
+                send_alert(f"🚨 *Trader Engine Alert*\nError: `{e}`. Auto-recovering trader in {delay}s...")
+            time.sleep(delay)
 
 
 # Track background workers for Watchdog supervision
@@ -202,7 +216,12 @@ def start_collector_thread():
     """Run async collector in background thread with auto-supervision and Telegram alert."""
     def _run():
         crash_count = 0
+        last_crash_time = 0.0
         while True:
+            now = time.time()
+            if last_crash_time > 0 and now - last_crash_time > 300:
+                crash_count = 0  # reset crash counter if ran stably for 5m
+
             clog.info("Starting WebSocket Data Collector in background thread...")
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -210,21 +229,25 @@ def start_collector_thread():
                 loop.run_until_complete(run_collector())
             except Exception as e:
                 crash_count += 1
-                clog.critical(f"Collector thread exception: {e!r}")
-                try:
-                    from app.notifier import send_watchdog_alert
-                    send_watchdog_alert(
-                        title="WebSocket Collector Disconnected",
-                        component="Data Pipeline (WebSocket Collector)",
-                        issue=f"WebSocket collector stream dropped: {e!r}",
-                        action=f"Auto-restarting stream attempt #{crash_count}...",
-                        severity="WARNING"
-                    )
-                except Exception:
-                    send_alert(f"⚠️ *Collector Alert*\nWebSocket Collector dropped: `{e!r}`\nAuto-restarting attempt #{crash_count}...")
+                last_crash_time = time.time()
+                clog.critical(f"Collector thread exception (attempt #{crash_count}): {e!r}")
+                if crash_count == 1 or crash_count % 10 == 0:
+                    try:
+                        from app.notifier import send_watchdog_alert
+                        send_watchdog_alert(
+                            title="WebSocket Collector Disconnected",
+                            component="Data Pipeline (WebSocket Collector)",
+                            issue=f"WebSocket collector stream dropped: {e!r}",
+                            action=f"Auto-restarting stream attempt #{crash_count}...",
+                            severity="WARNING"
+                        )
+                    except Exception:
+                        pass
             finally:
                 loop.close()
-            time.sleep(5)
+
+            delay = min(120, 5 * (2 ** min(crash_count - 1, 4))) if crash_count > 0 else 5
+            time.sleep(delay)
 
     t = threading.Thread(target=_run, daemon=True, name="CollectorSupervisionThread")
     t.start()
@@ -334,10 +357,17 @@ def start_health_monitor():
                                 severity="RESOLVED"
                             )
 
-                # 3. Emergency Unprotected Positions Check
-                has_pos_tbl = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='positions'").fetchone()
+                con.close()
+            except Exception as dbe:
+                clog.warning(f"Watchdog database check error: {dbe}")
+
+            # 3. Emergency Unprotected Positions Check (Using Neon DB)
+            try:
+                from app.db import get_db
+                con_db = get_db()
+                has_pos_tbl = con_db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='positions'").fetchone()
                 if has_pos_tbl:
-                    unprot = con.execute(
+                    unprot = con_db.execute(
                         "SELECT id, symbol, side, qty FROM positions WHERE status='EMERGENCY_UNPROTECTED'"
                     ).fetchall()
                     if unprot and send_watchdog_alert and should_alert("unprotected_pos", 900):
@@ -349,9 +379,9 @@ def start_health_monitor():
                             action="Watchdog flagging for emergency reconciliation.",
                             severity="CRITICAL"
                         )
-                con.close()
-            except Exception as dbe:
-                clog.warning(f"Watchdog database check error: {dbe}")
+                con_db.close()
+            except Exception as pe:
+                clog.warning(f"Watchdog positions check error: {pe}")
 
     t = threading.Thread(target=_watchdog_loop, daemon=True, name="UnifiedWatchdogThread")
     t.start()
