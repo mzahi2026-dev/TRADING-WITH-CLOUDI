@@ -42,6 +42,11 @@ class AIEngine:
         from .db import get_db
         return get_db()
 
+    def market_db(self):
+        con = sqlite3.connect(str(config.DB_PATH), timeout=20)
+        con.row_factory = sqlite3.Row
+        return con
+
     def ensure_schema(self):
         try:
             con = self.db()
@@ -170,6 +175,7 @@ class AIEngine:
             return
 
         con = self.db()
+        m_con = self.market_db()
         try:
             # 1. Check max open AI positions
             active_ai = self.get_active_ai_count(con)
@@ -180,15 +186,20 @@ class AIEngine:
             # 2. Check cooldown symbols
             recent_syms = self.get_recent_ai_symbols(con)
 
-            # 3. Get candidate coins from Watchlist / Universe
-            sd = con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
+            # 3. Get candidate coins from Watchlist / Universe (market_db SQLite)
+            has_wl = m_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist'").fetchone()
+            if not has_wl:
+                log.info("AI Engine: Watchlist table not populated yet.")
+                return
+
+            sd = m_con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
             candidates = []
             if sd:
                 wl_df = pd.read_sql_query(
                     "SELECT w.symbol, w.rank, COALESCE(u.quote_volume_24h, 0.0) as quote_vol_24h "
                     "FROM watchlist w "
                     "LEFT JOIN universe u ON w.symbol = u.symbol "
-                    "WHERE w.scan_date=? ORDER BY w.score DESC LIMIT 25", con, params=(sd,))
+                    "WHERE w.scan_date=? ORDER BY w.score DESC LIMIT 25", m_con, params=(sd,))
                 candidates = wl_df.to_dict("records")
 
             # Filter min volume and exclude recent cooldown symbols
@@ -208,11 +219,11 @@ class AIEngine:
                 try:
                     bid, ask = self.book(sym)
                     mid = (bid + ask) / 2
-                    # Fetch recent 15m klines from DB
+                    # Fetch recent 15m klines from market_db SQLite
                     k_df = pd.read_sql_query(
                         "SELECT open_time, open, high, low, close, volume FROM klines "
                         "WHERE symbol=? AND interval='15m' ORDER BY open_time DESC LIMIT 20",
-                        con, params=(sym,)
+                        m_con, params=(sym,)
                     )
                     if len(k_df) >= 10:
                         k_df = k_df.iloc[::-1]  # chronological order
@@ -295,6 +306,7 @@ Rules:
             log.exception(f"AI Engine cycle failed: {e}")
         finally:
             con.close()
+            m_con.close()
 
     def execute_ai_trade(self, con, sym: str, side: str, strat: str, conf: int, thesis: str):
         """Execute autonomous AI trade with fixed $15 SL and $30 TP."""

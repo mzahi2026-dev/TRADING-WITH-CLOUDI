@@ -4,6 +4,12 @@ from logging.handlers import RotatingFileHandler
 
 from . import config
 
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 config.LOG_DIR.mkdir(parents=True, exist_ok=True)
 log = logging.getLogger("trader")
 log.setLevel(logging.INFO)

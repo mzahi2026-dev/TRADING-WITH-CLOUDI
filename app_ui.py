@@ -733,6 +733,106 @@ def fix(action: str, request: Request):
     return {"ok": True, "msg": "started"}
 
 
+@app.get("/api/wallet")
+def api_wallet():
+    """Returns real-time Binance Demo Futures balance, margin, and open positions count."""
+    dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
+    res = {
+        "connected": False,
+        "mode": "DRY" if dry_mode else "DEMO",
+        "available": 0.0,
+        "total": 0.0,
+        "unrealized_pnl": 0.0,
+        "open_positions_count": 0,
+        "error": None
+    }
+    try:
+        from app.demo_client import DemoClient
+        dc = DemoClient()
+        av, tot = dc.balance()
+        pos_list = dc.positions()
+        active_pos = [p for p in pos_list if float(p.get("positionAmt", 0)) != 0]
+        unrealized = sum(float(p.get("unRealizedProfit", 0)) for p in active_pos)
+
+        res.update({
+            "connected": True,
+            "available": round(av, 2),
+            "total": round(tot, 2),
+            "unrealized_pnl": round(unrealized, 2),
+            "open_positions_count": len(active_pos),
+        })
+    except Exception as e:
+        res["error"] = str(e)
+    return res
+
+
+@app.post("/api/emergency_close_all")
+def api_emergency_close_all():
+    """Emergency Panic Switch: Closes all active demo positions immediately and cancels open conditional orders."""
+    closed_items = []
+    errors = []
+
+    try:
+        from app.demo_client import DemoClient
+        dc = DemoClient()
+        pos_list = dc.positions()
+        active_pos = [p for p in pos_list if float(p.get("positionAmt", 0)) != 0]
+
+        for p in active_pos:
+            sym = p["symbol"]
+            amt = float(p["positionAmt"])
+            side = "SELL" if amt > 0 else "BUY"
+            qty = abs(amt)
+            dir_str = "LONG" if amt > 0 else "SHORT"
+
+            try:
+                # 1. Cancel conditional SL/TP orders
+                dc.cancel_conditionals(sym)
+                # 2. Market close position
+                dc.market(sym, side, qty, reduce=True)
+                closed_items.append(f"{sym} ({dir_str} {qty})")
+            except Exception as ce:
+                errors.append(f"{sym}: {ce}")
+
+        # Update Neon DB status for open positions
+        if closed_items:
+            try:
+                con = db()
+                now_str = datetime.now(timezone(timedelta(hours=6))).strftime("%Y-%m-%d %H:%M:%S")
+                con.execute(
+                    "UPDATE positions SET status='EMERGENCY_CLOSED', result='PANIC_CLOSE', closed=? "
+                    "WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')",
+                    (now_str,)
+                )
+                con.commit()
+                con.close()
+            except Exception as de:
+                errors.append(f"DB update error: {de}")
+
+            # Send Telegram Watchdog alert
+            try:
+                from app.notifier import send_watchdog_alert
+                items_str = ", ".join(closed_items)
+                send_watchdog_alert(
+                    title="EMERGENCY PANIC CLOSE EXECUTED",
+                    component="Dashboard Emergency Switch",
+                    issue=f"Manual emergency close triggered from Web UI! Closed: {items_str}",
+                    action="All open demo positions closed via market order & conditional SL/TP cancelled.",
+                    severity="WARNING"
+                )
+            except Exception:
+                pass
+
+        return {
+            "ok": True,
+            "closed_count": len(closed_items),
+            "closed_items": closed_items,
+            "errors": errors
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 if __name__ == "__main__":
     print("Open: http://localhost:8000")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="warning")

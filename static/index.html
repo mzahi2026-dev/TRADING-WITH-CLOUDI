@@ -199,6 +199,11 @@ table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:4px 8px;b
         <button class="on" data-i="macd">MACD</button>
         <button id="btnAnalysis" style="background:#2b4c7e;border-color:#4a80c9;color:#fff;font-weight:700;margin-left:4px">⚡ Analysis</button>
       </span>
+      <div id="walletBadge" title="Binance Futures Balance (Click to refresh)" style="display:inline-flex;align-items:center;gap:5px;background:#132133;border:1px solid #253e5e;padding:2px 7px;border-radius:4px;font-size:11px;color:#cbd5e1;cursor:pointer;font-variant-numeric:tabular-nums;user-select:none">
+        <span style="color:#f59e0b;font-weight:700">💰</span>
+        <span id="walletVal">Wallet: $...</span>
+      </div>
+      <button id="btnPanicClose" style="background:#521417;border:1px solid #8c252a;color:#fca5a5;font-weight:700;font-size:10px;padding:3px 6px;border-radius:4px;cursor:pointer" title="Emergency: Close all open positions & cancel orders">🛑 Panic Close</button>
       <span id="live">-</span>
       <button id="tr" title="Dan sidebar">&#9654;</button>
     </div>
@@ -1148,14 +1153,67 @@ $('#hitems').addEventListener('click', async e => {
 });
 $('#btnTest').onclick = () => { $('#sum').textContent = 'checking...'; health(); loadWatch(); load(false); };
 
+// ---------- wallet balance & panic switch
+async function loadWallet() {
+  try {
+    const r = await fetch('/api/wallet');
+    const d = await r.json();
+    const wVal = document.getElementById('walletVal');
+    if (!wVal) return;
+    if (d.connected) {
+      const pnlColor = d.unrealized_pnl >= 0 ? '#10b981' : '#f87171';
+      const pnlSign = d.unrealized_pnl > 0 ? '+' : '';
+      let text = `$${d.total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+      if (d.open_positions_count > 0) {
+        text += ` (<span style="color:${pnlColor};font-weight:700">${pnlSign}$${d.unrealized_pnl.toFixed(2)}</span> · ${d.open_positions_count} pos)`;
+      }
+      wVal.innerHTML = text;
+      document.getElementById('walletBadge').title = `Available: $${d.available} | Total: $${d.total} | Unrealized: ${pnlSign}$${d.unrealized_pnl} (${d.mode} Mode)`;
+    } else {
+      wVal.textContent = d.mode === 'DRY' ? 'DRY RUN' : 'Wallet: Offline';
+    }
+  } catch (e) {
+    console.warn('Wallet fetch error:', e);
+  }
+}
+
+const btnPanic = document.getElementById('btnPanicClose');
+if (btnPanic) {
+  btnPanic.onclick = async () => {
+    if (!confirm('⚠️ Are you sure you want to CLOSE ALL open positions and CANCEL all orders immediately?')) return;
+    btnPanic.disabled = true;
+    btnPanic.textContent = 'Closing...';
+    try {
+      const r = await fetch('/api/emergency_close_all', { method: 'POST' });
+      const d = await r.json();
+      if (d.ok) {
+        alert(`✅ Emergency Close Complete!\nClosed: ${d.closed_count} position(s)\n${d.closed_items.join('\n')}`);
+      } else {
+        alert(`❌ Emergency Close failed: ${d.error}`);
+      }
+    } catch (err) {
+      alert(`Network error: ${err}`);
+    } finally {
+      btnPanic.disabled = false;
+      btnPanic.textContent = '🛑 Panic Close';
+      loadWallet();
+      loadSP();
+    }
+  };
+}
+
+const wBadge = document.getElementById('walletBadge');
+if (wBadge) wBadge.onclick = loadWallet;
+
 // ---------- init
 $('#sym').value = sym;
-buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch(); loadSP(); loadJournal();
+buildTf(); applyVis(); loadDr(); setTool('cursor'); load(true); connectWS(); health(); loadWatch(); loadSP(); loadJournal(); loadWallet();
 requestAnimationFrame(loop);
 setInterval(health, 15000);
 setInterval(loadWatch, 60000);
 setInterval(loadSP, 15000);
 setInterval(loadJournal, 30000);
+setInterval(loadWallet, 15000);
 </script>
 </body>
 </html>

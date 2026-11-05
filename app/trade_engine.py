@@ -66,6 +66,11 @@ class Engine:
         from .db import get_db
         return get_db()
 
+    def market_db(self):
+        con = sqlite3.connect(str(config.DB_PATH), timeout=20)
+        con.row_factory = sqlite3.Row
+        return con
+
     # ------------------------------------------------------------ helpers
     def book(self, sym):
         d = self.pub.get("/fapi/v1/depth", {"symbol": sym, "limit": 5})
@@ -77,9 +82,9 @@ class Engine:
         return float(r[0]) if r else None
 
     def info(self, sym):
-        con = self.db()
-        r = con.execute("SELECT tick_size, step_size, min_qty, min_notional "
-                        "FROM exchange_info WHERE symbol=?", (sym,)).fetchone()
+        con = self.market_db()
+        has_tbl = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='exchange_info'").fetchone()
+        r = con.execute("SELECT tick_size, step_size, min_qty, min_notional FROM exchange_info WHERE symbol=?", (sym,)).fetchone() if has_tbl else None
         con.close()
         return r
 
@@ -131,23 +136,26 @@ class Engine:
         if not self.dry:
             self.reconcile()
         con = self.db()
+        m_con = self.market_db()
         try:
-            # 1. Candidate Symbols: Direct Watchlist (Top 20 high-volume coins) + Hourly Ranking
-            sd = con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0]
+            # 1. Candidate Symbols: Direct Watchlist + Hourly Ranking from market_db (SQLite)
+            has_wl = m_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist'").fetchone()
+            sd = m_con.execute("SELECT MAX(scan_date) FROM watchlist").fetchone()[0] if has_wl else None
             candidates = []
             if sd:
                 wl_df = pd.read_sql_query(
                     "SELECT w.symbol, w.rank, COALESCE(u.quote_volume_24h, 0.0) as quote_vol_24h "
                     "FROM watchlist w "
                     "LEFT JOIN universe u ON w.symbol = u.symbol "
-                    "WHERE w.scan_date=? ORDER BY w.score DESC LIMIT 25", con, params=(sd,))
+                    "WHERE w.scan_date=? ORDER BY w.score DESC LIMIT 25", m_con, params=(sd,))
                 candidates = wl_df.to_dict("records")
 
-            rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0]
+            has_rk = m_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ranking'").fetchone()
+            rh = m_con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0] if has_rk else None
             if rh:
                 rk_df = pd.read_sql_query(
                     "SELECT symbol, rank, quote_vol_24h FROM ranking WHERE run_hour=? ORDER BY rank",
-                    con, params=(rh,))
+                    m_con, params=(rh,))
                 seen = {c["symbol"] for c in candidates}
                 for r in rk_df.to_dict("records"):
                     if r["symbol"] not in seen:
@@ -184,8 +192,7 @@ class Engine:
             ph = ",".join("?" * len(syms))
             n = 0
             for _ in range(12):
-                n = con.execute(f"SELECT COUNT(DISTINCT symbol) FROM klines WHERE interval='15m' "
-                                f"AND open_time=? AND symbol IN ({ph})", [exp_open] + syms).fetchone()[0]
+                n = m_con.execute(f"SELECT COUNT(DISTINCT symbol) FROM klines WHERE interval='15m' AND open_time=? AND symbol IN ({ph})", [exp_open] + syms).fetchone()[0]
                 if n >= 0.5 * len(syms):
                     break
                 time.sleep(10)
@@ -209,7 +216,7 @@ class Engine:
                 df = pd.read_sql_query(
                     "SELECT open_time, open, high, low, close, volume, taker_buy_base FROM klines "
                     "WHERE symbol=? AND interval='15m' AND open_time<=? "
-                    "ORDER BY open_time DESC LIMIT 120", con, params=(sym, exp_open))
+                    "ORDER BY open_time DESC LIMIT 120", m_con, params=(sym, exp_open))
                 df = df.sort_values("open_time").reset_index(drop=True)
                 if df.empty or int(df["open_time"].iloc[-1]) != exp_open or len(df) < 50:
                     continue
@@ -252,7 +259,7 @@ class Engine:
                 if n_open >= tc.MAX_OPEN:
                     skip("max position")
                     continue
-                fr = self.funding(con, sym)
+                fr = self.funding(m_con, sym)
                 if fr is not None and abs(fr) > tc.MAX_FUNDING:
                     skip(f"funding {fr * 100:.3f}%")
                     continue
@@ -290,6 +297,7 @@ class Engine:
                      f"signals={nsig} taken={taken} open={n_open}")
         finally:
             con.close()
+            m_con.close()
 
     # ------------------------------------------------------------ execute
     def try_cond(self, sym, side, otype, trigger):
@@ -518,6 +526,7 @@ class Engine:
                             self.close_row(con, pid, sym, side, entry, sl, tp, ems)
         finally:
             con.close()
+            m_con.close()
 
     def close_row(self, con, pid, sym, side, entry, sl, tp, ems):
         try:
