@@ -306,7 +306,7 @@ def send_hourly_report():
     dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
     mode_str = "DRY RUN" if dry_mode else ("DEMO" if getattr(config, "USE_DEMO", True) else "LIVE")
 
-    from .db import get_db
+    from .db import get_db, market_db
     con = get_db()
 
     # 1. Closed Trades in last 24h & last 1h
@@ -344,12 +344,14 @@ def send_hourly_report():
         "SELECT symbol, side, entry, sl, tp, qty, status FROM positions WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')"
     ).fetchall() if has_pos else []
 
-    # 3. Top Hourly Ranking
-    has_rk = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ranking'").fetchone()
-    latest_rh = con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0] if has_rk else None
-    rk_top = con.execute(
+    # 3. Top Hourly Ranking (from local market SQLite)
+    m_con = market_db()
+    has_rk = m_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ranking'").fetchone()
+    latest_rh = m_con.execute("SELECT MAX(run_hour) FROM ranking").fetchone()[0] if has_rk else None
+    rk_top = m_con.execute(
         "SELECT symbol, rank, side, rank_score FROM ranking WHERE run_hour=? ORDER BY rank ASC LIMIT 3", (latest_rh,)
     ).fetchall() if latest_rh else []
+    m_con.close()
 
     con.close()
 

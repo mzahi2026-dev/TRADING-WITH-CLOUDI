@@ -41,12 +41,13 @@ def db():
 
 
 def market_db():
-    return sqlite3.connect(str(config.DB_PATH), timeout=30)
+    from app.db import market_db as _mdb
+    return _mdb()
 
 
 def has_table(con, name):
-    r = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone()
-    return r is not None
+    from app.db import has_table as _ht
+    return _ht(con, name)
 
 
 def clean(df):
@@ -344,16 +345,21 @@ def positions():
                     r["mark_price"] = float(lp.get("markPrice") or 0)
                     r["unrealized_pnl"] = float(lp.get("unRealizedProfit") or 0)
                 else:
-                    # Fallback to premium table
-                    pr_row = con.execute("SELECT mark_price FROM premium WHERE symbol=? ORDER BY ts DESC LIMIT 1", (sym,)).fetchone()
-                    if pr_row and pr_row[0]:
-                        mp = float(pr_row[0])
-                        r["mark_price"] = mp
-                        en = float(r.get("entry") or 0)
-                        qt = float(r.get("qty") or 0)
-                        sd = str(r.get("side", "")).upper()
-                        if en > 0 and qt > 0:
-                            r["unrealized_pnl"] = round((mp - en) * qt if sd == "LONG" else (en - mp) * qt, 4)
+                    # Fallback to premium table in SQLite
+                    try:
+                        mcon = market_db()
+                        pr_row = mcon.execute("SELECT mark_price FROM premium WHERE symbol=? ORDER BY ts DESC LIMIT 1", (sym,)).fetchone()
+                        mcon.close()
+                        if pr_row and pr_row[0]:
+                            mp = float(pr_row[0])
+                            r["mark_price"] = mp
+                            en = float(r.get("entry") or 0)
+                            qt = float(r.get("qty") or 0)
+                            sd = str(r.get("side", "")).upper()
+                            if en > 0 and qt > 0:
+                                r["unrealized_pnl"] = round((mp - en) * qt if sd == "LONG" else (en - mp) * qt, 4)
+                    except Exception:
+                        pass
     except Exception:
         pass
     con.close()
@@ -621,9 +627,17 @@ def health():
         "hint": "" if st == "ok" else "Scheduler (python scanner_main.py) bondho ba 1h candle nai. Fix: Hourly rank.",
         "fix": None if st == "ok" else "rank"})
 
-    # Signal engine health
+    # Signal engine health (check Postgres db first, fallback to SQLite)
     sig_last = None
-    if has_table(con, "signals"):
+    try:
+        pg_con = db()
+        if has_table(pg_con, "signals"):
+            sig_r = pg_con.execute("SELECT MAX(time) FROM signals").fetchone()
+            sig_last = sig_r[0] if sig_r else None
+        pg_con.close()
+    except Exception:
+        pass
+    if not sig_last and has_table(con, "signals"):
         sig_r = con.execute("SELECT MAX(time) FROM signals").fetchone()
         sig_last = sig_r[0] if sig_r else None
     items.append({

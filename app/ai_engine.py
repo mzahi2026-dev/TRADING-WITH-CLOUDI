@@ -36,6 +36,13 @@ class AIEngine:
         self.dc = None if dry else DemoClient()
         self.api_key = os.getenv("GEMINI_API_KEY", "").strip()
         self.model_name = getattr(tc, "AI_MODEL", "gemini-3.8-flash")
+        self._genai_client = None
+        if self.api_key:
+            try:
+                from google import genai
+                self._genai_client = genai.Client(api_key=self.api_key)
+            except Exception as ge:
+                log.warning(f"AI Engine: Failed to pre-init GenAI client: {ge}")
         self.ensure_schema()
 
     def db(self):
@@ -72,17 +79,57 @@ class AIEngine:
         except Exception:
             return 0
 
-    def get_recent_ai_symbols(self, con):
-        """Symbols traded by AI within cooldown window (1 hour)."""
+    def get_active_and_recent_symbols(self, con):
+        """Symbols currently open or traded within cooldown window across all engines."""
         cutoff_ms = int(time.time() * 1000) - int(tc.AI_REENTRY_COOLDOWN_HOURS * 3600 * 1000)
         try:
-            rows = con.execute(
-                "SELECT DISTINCT symbol FROM positions WHERE UPPER(COALESCE(engine, 'RULE'))='AI' "
-                "AND entry_ms >= ?", (cutoff_ms,)
+            # 1. Block any symbol currently OPEN or EMERGENCY_UNPROTECTED (AI or RULE)
+            open_rows = con.execute(
+                "SELECT DISTINCT symbol FROM positions WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')"
             ).fetchall()
-            return {r[0] for r in rows if r[0]}
-        except Exception:
+            # 2. Block any symbol traded recently within cooldown window
+            recent_rows = con.execute(
+                "SELECT DISTINCT symbol FROM positions WHERE entry_ms >= ?", (cutoff_ms,)
+            ).fetchall()
+            blocked = {r[0] for r in open_rows if r[0]} | {r[0] for r in recent_rows if r[0]}
+            return blocked
+        except Exception as e:
+            log.warning(f"AI Engine: active/recent symbols query error: {e}")
             return set()
+
+    def get_btc_regime(self, m_con):
+        """Analyze BTCUSDT 1h trend to determine market regime (BULLISH, BEARISH, NEUTRAL)."""
+        try:
+            btc_df = pd.read_sql_query(
+                "SELECT open_time, open, high, low, close, volume FROM klines "
+                "WHERE symbol='BTCUSDT' AND interval='1h' ORDER BY open_time DESC LIMIT 100",
+                m_con
+            )
+            if len(btc_df) < 40:
+                return "NEUTRAL", 0.0, 0.0, 50.0
+            btc_df = btc_df.iloc[::-1].reset_index(drop=True)
+            c = btc_df["close"].astype(float)
+            e20 = c.ewm(span=20, adjust=False).mean().iloc[-1]
+            e50 = c.ewm(span=50, adjust=False).mean().iloc[-1]
+            curr = c.iloc[-1]
+            # RSI 14
+            delta = c.diff()
+            up = delta.clip(lower=0)
+            dn = -delta.clip(upper=0)
+            rs = up.ewm(alpha=1/14, adjust=False).mean() / dn.ewm(alpha=1/14, adjust=False).mean().replace(0, np.nan)
+            rsi = float((100 - 100 / (1 + rs)).iloc[-1])
+
+            if curr > e20 and e20 > e50 and rsi >= 48:
+                return "BULLISH", curr, e50, rsi
+            elif curr < e20 and e20 < e50:
+                return "BEARISH", curr, e50, rsi
+            elif curr < e50 or rsi < 42:
+                return "BEARISH", curr, e50, rsi
+            else:
+                return "NEUTRAL", curr, e50, rsi
+        except Exception as e:
+            log.warning(f"AI Engine: BTC regime check error: {e}")
+            return "NEUTRAL", 0.0, 0.0, 50.0
 
     def book(self, sym):
         d = self.pub.get("/fapi/v1/depth", {"symbol": sym, "limit": 5})
@@ -127,10 +174,14 @@ class AIEngine:
 
         for model_candidate in candidates:
             try:
-                from google import genai
                 from google.genai import types
 
-                client = genai.Client(api_key=self.api_key)
+                client = self._genai_client
+                if not client:
+                    from google import genai
+                    client = genai.Client(api_key=self.api_key)
+                    self._genai_client = client
+
                 response = client.models.generate_content(
                     model=model_candidate,
                     contents=prompt,
@@ -184,7 +235,7 @@ class AIEngine:
                 return
 
             # 2. Check cooldown symbols
-            recent_syms = self.get_recent_ai_symbols(con)
+            recent_syms = self.get_active_and_recent_symbols(con)
 
             # 3. Get candidate coins from Watchlist / Universe (market_db SQLite)
             has_wl = m_con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='watchlist'").fetchone()
@@ -212,30 +263,44 @@ class AIEngine:
                 log.info("AI Engine: No eligible candidates after cooldown & volume filter.")
                 return
 
-            # 4. Build Market Context for Gemini
+            # 4. Build Market Context for Gemini (with BTC Regime & accurate indicators)
+            btc_regime, btc_curr, btc_e50, btc_rsi = self.get_btc_regime(m_con)
+            log.info(f"AI Engine: BTC 1h Regime = {btc_regime} (Price: ${btc_curr:.1f}, EMA50: ${btc_e50:.1f}, RSI: {btc_rsi:.1f})")
+
             market_data = []
-            for c in candidates[:8]:  # analyze top 8 high-conviction candidates to keep prompt fast
+            atr_map = {}
+            for c in candidates[:8]:  # analyze top 8 high-conviction candidates
                 sym = c["symbol"]
                 try:
                     bid, ask = self.book(sym)
                     mid = (bid + ask) / 2
-                    # Fetch recent 15m klines from market_db SQLite
+                    # Fetch 150 klines for statistically accurate EMA20, EMA50, and ATR
                     k_df = pd.read_sql_query(
                         "SELECT open_time, open, high, low, close, volume FROM klines "
-                        "WHERE symbol=? AND interval='15m' ORDER BY open_time DESC LIMIT 20",
+                        "WHERE symbol=? AND interval='15m' ORDER BY open_time DESC LIMIT 150",
                         m_con, params=(sym,)
                     )
-                    if len(k_df) >= 10:
-                        k_df = k_df.iloc[::-1]  # chronological order
-                        closes = k_df["close"].tolist()
-                        ema20 = pd.Series(closes).ewm(span=20, adjust=False).mean().iloc[-1]
-                        ema50 = pd.Series(closes).ewm(span=50, adjust=False).mean().iloc[-1]
+                    if len(k_df) >= 50:
+                        k_df = k_df.iloc[::-1].reset_index(drop=True)
+                        closes = k_df["close"].astype(float)
+                        highs = k_df["high"].astype(float)
+                        lows = k_df["low"].astype(float)
+                        ema20 = closes.ewm(span=20, adjust=False).mean().iloc[-1]
+                        ema50 = closes.ewm(span=50, adjust=False).mean().iloc[-1]
+                        
+                        # ATR 14
+                        prev_c = closes.shift(1)
+                        tr = pd.concat([highs - lows, (highs - prev_c).abs(), (lows - prev_c).abs()], axis=1).max(axis=1)
+                        atr14 = float(tr.rolling(14).mean().iloc[-1])
+                        atr_map[sym] = atr14
+
                         market_data.append({
                             "symbol": sym,
                             "current_price": mid,
                             "24h_volume_usd": float(c.get("quote_vol_24h", 0)),
                             "ema20": round(float(ema20), 6),
                             "ema50": round(float(ema50), 6),
+                            "atr14": round(atr14, 6),
                             "last_5_candles": [
                                 {"c": round(row["close"], 6), "v": round(row["volume"], 2)}
                                 for _, row in k_df.tail(5).iterrows()
@@ -248,15 +313,22 @@ class AIEngine:
                 log.warning("AI Engine: Could not assemble market data for candidates.")
                 return
 
-            # 5. Formulate Prompt
+            # 5. Formulate Prompt with Market Regime
             prompt = f"""
 You are the autonomous Senior Crypto Quant Analyst for Trading Cloudi.
 Evaluate the following candidate coins on 15m timeframe and find at most ONE high-probability trade setup.
 
+Market Overview:
+- Bitcoin (BTCUSDT 1h): {btc_regime} (Price: ${btc_curr:.1f}, 1h EMA50: ${btc_e50:.1f}, RSI: {btc_rsi:.1f})
+- REGIME GATING RULE:
+  * When BTC is BEARISH, market probability heavily punishes Altcoin LONGs. You MUST NOT propose any Altcoin LONG setup. Only propose an exceptionally clean SHORT setup (confidence >= 80%), or set "has_trade": false.
+  * When BTC is BULLISH, favor high-probability LONG trend continuation or pullback bounces.
+  * When market is choppy, unclear, or unconvincing, set "has_trade": false.
+
 Capital & Risk Parameters:
 - Max position size: ${tc.AI_NOTIONAL_USDT:.2f} USDT notional
-- Stop Loss: Fixed ${tc.AI_SL_USDT:.2f} USDT loss risk
-- Take Profit: Fixed ${tc.AI_TP_USDT:.2f} USDT reward target (1:2 Risk to Reward)
+- Target Stop Loss Risk: ${tc.AI_SL_USDT:.2f} USDT (Dynamic ATR-based stop)
+- Target Take Profit Reward: ${tc.AI_TP_USDT:.2f} USDT (1:2 Risk to Reward)
 - Minimum confidence required: {tc.AI_MIN_CONFIDENCE}%
 
 Candidates Data:
@@ -299,8 +371,9 @@ Rules:
 
             log.info(f"AI Engine: 🌟 GEMINI SETUP FOUND! {sym} {side} (Conf: {conf}%) | {strat}")
 
-            # 6. Execute Order
-            self.execute_ai_trade(con, sym, side, strat, conf, thesis)
+            # 6. Execute Order with Dynamic ATR
+            chosen_atr = atr_map.get(sym, 0.0)
+            self.execute_ai_trade(con, sym, side, strat, conf, thesis, atr=chosen_atr)
 
         except Exception as e:
             log.exception(f"AI Engine cycle failed: {e}")
@@ -308,8 +381,8 @@ Rules:
             con.close()
             m_con.close()
 
-    def execute_ai_trade(self, con, sym: str, side: str, strat: str, conf: int, thesis: str):
-        """Execute autonomous AI trade with fixed $15 SL and $30 TP."""
+    def execute_ai_trade(self, con, sym: str, side: str, strat: str, conf: int, thesis: str, atr: float = 0.0):
+        """Execute autonomous AI trade with Dynamic ATR Stop Loss and strict $15 Risk Capping."""
         info = self.info(sym)
         if not info:
             log.error(f"AI Execute: exchange_info not found for {sym}")
@@ -319,9 +392,27 @@ Rules:
         bid, ask = self.book(sym)
         mid = (bid + ask) / 2
 
-        # Quantity calculation for $200 USDT notional
-        q = Decimal(str(tc.AI_NOTIONAL_USDT)) / Decimal(str(mid))
+        # 1. Dynamic ATR-based Stop Distance calculation
+        if atr and atr > 0:
+            sl_dist = Decimal(str(round(1.5 * atr, 6)))
+        else:
+            sl_dist = Decimal(str(mid)) * Decimal("0.03")
+
+        # Volatility Guardrails: minimum 1.5% distance, maximum 7.5% distance
+        min_dist = Decimal(str(mid)) * Decimal("0.015")
+        max_dist = Decimal(str(mid)) * Decimal("0.075")
+        sl_dist = max(min_dist, min(max_dist, sl_dist))
+
+        # 2. Position Sizing: Risk = sl_dist * q == $15.0 USDT
+        target_risk = Decimal(str(getattr(tc, "AI_SL_USDT", 15.0)))
+        q = target_risk / sl_dist
+
+        # Cap max notional size ($200)
+        max_notional = Decimal(str(getattr(tc, "AI_NOTIONAL_USDT", 200.0)))
+        max_q = max_notional / Decimal(str(mid))
+        q = min(q, max_q)
         q = (q / step).to_integral_value(rounding=ROUND_DOWN) * step
+
         if q < minq or q * Decimal(str(mid)) < max(minn, Decimal("5")):
             log.error(f"AI Execute: Qty {q} too small for {sym}")
             return False
@@ -333,11 +424,9 @@ Rules:
             except Exception as e:
                 log.warning(f"AI Execute: margin/leverage error {sym}: {e}")
 
-        # Exact SL and TP calculation for $15 loss and $30 profit
-        # Loss = |Entry - SL| * Qty = 15.0 => delta_sl = 15.0 / Qty
-        # Profit = |Entry - TP| * Qty = 30.0 => delta_tp = 30.0 / Qty
-        delta_sl = float(Decimal(str(tc.AI_SL_USDT)) / q)
-        delta_tp = float(Decimal(str(tc.AI_TP_USDT)) / q)
+        # Exact delta_sl and delta_tp based on actual rounded quantity
+        delta_sl = float(target_risk / q)
+        delta_tp = float(Decimal(str(getattr(tc, "AI_TP_USDT", 30.0))) / q)
 
         if side == "LONG":
             sl_price = rt(mid - delta_sl, tick)

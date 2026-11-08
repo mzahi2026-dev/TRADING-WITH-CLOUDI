@@ -395,7 +395,9 @@ def main():
     print("       TRADING WITH CLOUDI - UNIFIED GUARDIAN SYSTEM")
     print("=" * 65)
     print(" [✓] Duplicate Protection : ACTIVE (Single Instance Enforced)")
-    print(" [✓] Safe Trading Mode     : DRY RUN ONLY (No real order placed)")
+    dry_mode = os.getenv("TRADER_DRY_MODE", "false").lower() == "true"
+    mode_desc = "DRY RUN ONLY (Paper Mode)" if dry_mode else "BINANCE DEMO FUTURES (Live Demo Orders)"
+    print(f" [✓] Safe Trading Mode     : {mode_desc}")
     print(" [✓] Auto-Recovery        : ACTIVE (Self-Healing Watchdogs)")
     print(" [✓] Telegram Alerts      : CONFIGURED (Notifies on drop/stale)")
     print("=" * 65)
