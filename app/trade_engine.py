@@ -627,7 +627,6 @@ class Engine:
 
         finally:
             con.close()
-            m_con.close()
 
     def close_row(self, con, pid, sym, side, entry, sl, tp, ems):
         try:
