@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS positions (
     time TEXT, symbol TEXT, strategy TEXT, side TEXT,
     entry REAL, sl REAL, tp REAL, qty REAL, status TEXT,
     exit REAL, pnl REAL, fee REAL, result TEXT, closed TEXT, entry_ms INTEGER,
-    engine TEXT DEFAULT 'RULE', ai_thesis TEXT, ai_confidence INTEGER
+    engine TEXT DEFAULT 'RULE', ai_thesis TEXT, ai_confidence INTEGER,
+    closed_ms INTEGER, tp1_hit INTEGER DEFAULT 0, tp1_price REAL DEFAULT 0, original_qty REAL DEFAULT 0
 );
 """
 
@@ -57,6 +58,14 @@ class Engine:
                 con.execute("ALTER TABLE positions ADD COLUMN ai_thesis TEXT")
             if "ai_confidence" not in cols:
                 con.execute("ALTER TABLE positions ADD COLUMN ai_confidence INTEGER")
+            if "closed_ms" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN closed_ms INTEGER")
+            if "tp1_hit" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN tp1_hit INTEGER DEFAULT 0")
+            if "tp1_price" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN tp1_price REAL DEFAULT 0")
+            if "original_qty" not in cols:
+                con.execute("ALTER TABLE positions ADD COLUMN original_qty REAL DEFAULT 0")
         except Exception:
             pass
         con.commit()
@@ -112,7 +121,7 @@ class Engine:
         mode = "DRY (order hobe na)" if self.dry else "DEMO ORDER"
         target_risk = getattr(tc, "TARGET_RISK_USDT", 15.0)
         log.info(f"Trader start | mode={mode} | Risk ${target_risk} USDT x{tc.LEVERAGE} | "
-                 f"max {tc.MAX_OPEN} | SL {tc.SL_ATR} ATR / TP {tc.TP_ATR} ATR")
+                 f"max {tc.MAX_OPEN} | SL {tc.SL_ATR} ATR / TP1 {getattr(tc, 'TP1_ATR', 2.0)} ATR / TP2 {tc.TP_ATR} ATR")
         if not self.dry:
             if self.dc.dual_mode():
                 try:
@@ -161,10 +170,10 @@ class Engine:
                     if r["symbol"] not in seen:
                         candidates.append(r)
 
-            # Filter candidates with min volume >= $15M
+            # Filter candidates with min volume >= $30M (eliminates micro-cap volatility)
             candidates = [c for c in candidates if float(c.get("quote_vol_24h", 0)) >= tc.MIN_VOL_24H][:20]
             if not candidates:
-                log.warning("Kono active candidate symbol nai. Scanner chalu ache?")
+                log.warning("Kono active candidate symbol nai ($30M+ volume). Scanner chalu ache?")
                 return
 
             # Risk Limit: Daily drawdown / loss circuit breaker
@@ -202,8 +211,18 @@ class Engine:
                 return
 
             open_syms = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE status IN ('OPEN', 'EMERGENCY_UNPROTECTED')")}
-            cutoff = int(time.time() * 1000) - tc.COOLDOWN_HOURS * 3600 * 1000
+            now_ms = int(time.time() * 1000)
+            cutoff = now_ms - tc.COOLDOWN_HOURS * 3600 * 1000
+            loss_cutoff = now_ms - getattr(tc, "LOSS_COOLDOWN_HOURS", 12) * 3600 * 1000
+
+            cols = [col[1] for col in con.execute("PRAGMA table_info(positions)").fetchall()]
+            closed_ts_expr = "COALESCE(closed_ms, entry_ms)" if "closed_ms" in cols else "entry_ms"
+
             cool = {r[0] for r in con.execute("SELECT symbol FROM positions WHERE entry_ms>=?", (cutoff,))}
+            loss_cool = {r[0] for r in con.execute(
+                f"SELECT DISTINCT symbol FROM positions WHERE (result='SL' OR pnl < 0) AND {closed_ts_expr}>=?",
+                (loss_cutoff,))}
+
             n_open = len(open_syms)
             checked = nsig = taken = 0
 
@@ -211,8 +230,31 @@ class Engine:
                 sym = r["symbol"]
                 rnk = r.get("rank", 99)
                 vol_24h = float(r.get("quote_vol_24h", 0))
-                if sym in open_syms or sym in cool or vol_24h < tc.MIN_VOL_24H:
+
+                if sym in open_syms:
                     continue
+                if sym in loss_cool:
+                    log.info(f"{sym}: Under 12h loss cooldown guard (recent SL hit). Skipping.")
+                    continue
+                if sym in cool or vol_24h < tc.MIN_VOL_24H:
+                    continue
+
+                # 1H Macro Trend & ADX Filter (Prune low-ADX chop)
+                h1_df = pd.read_sql_query(
+                    "SELECT open_time, open, high, low, close, volume FROM klines "
+                    "WHERE symbol=? AND interval='1h' ORDER BY open_time DESC LIMIT 60",
+                    m_con, params=(sym,)
+                )
+                if len(h1_df) >= 30:
+                    h1_df = h1_df.iloc[::-1].reset_index(drop=True)
+                    from .ai_engine import compute_adx
+                    h1_adx_s = compute_adx(h1_df, 14)
+                    h1_adx = float(h1_adx_s.iloc[-1]) if not h1_adx_s.empty and not pd.isna(h1_adx_s.iloc[-1]) else 0.0
+                    adx_min = getattr(tc, "ADX_MIN_THRESHOLD", 25.0)
+                    if h1_adx < adx_min:
+                        # Skip directionless chop
+                        continue
+
                 df = pd.read_sql_query(
                     "SELECT open_time, open, high, low, close, volume, taker_buy_base FROM klines "
                     "WHERE symbol=? AND interval='15m' AND open_time<=? "
@@ -226,7 +268,7 @@ class Engine:
                     continue
                 checked += 1
 
-                # INDEPENDENT DIRECTION: Evaluate BOTH LONG and SHORT setups on 15m price action!
+                # INDEPENDENT DIRECTION: Evaluate BOTH LONG and SHORT setups on 15m price action
                 ev_long = evaluate(df, "LONG")
                 ev_short = evaluate(df, "SHORT")
 
@@ -335,6 +377,7 @@ class Engine:
         tick, step, minq, minn = [Decimal(str(x)) for x in info]
         if tick <= 0 or step <= 0:
             return False, "bad tick/step"
+
         # Dynamic Risk Sizing: Target $15 USDT risk on Stop Loss (1.5 * ATR)
         risk_usdt = Decimal(str(getattr(tc, "TARGET_RISK_USDT", 15.0)))
         sl_dist = Decimal(str(tc.SL_ATR)) * Decimal(str(atr))
@@ -393,7 +436,9 @@ class Engine:
 
         k = 1 if side == "LONG" else -1
         sl = rt(entry - k * tc.SL_ATR * atr, tick)
+        tp1 = rt(entry + k * getattr(tc, "TP1_ATR", 2.0) * atr, tick)
         tp = rt(entry + k * tc.TP_ATR * atr, tick)
+
         if not self.try_cond(sym, cs, "STOP_MARKET", sl):
             log.error(f"{sym}: SL boshate parlam na! Attempting emergency close...")
             try:
@@ -423,9 +468,9 @@ class Engine:
                         severity="CRITICAL"
                     )
                 con = self.db()
-                con.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
-                            "VALUES (?,?,?,?,?,?,?,?,'EMERGENCY_UNPROTECTED',?)",
-                            (bdt(), sym, name, side, entry, sl, tp, amt, t_before))
+                con.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms,engine,tp1_hit,tp1_price,original_qty) "
+                            "VALUES (?,?,?,?,?,?,?,?,'EMERGENCY_UNPROTECTED',?,'RULE',0,?,?)",
+                            (bdt(), sym, name, side, entry, sl, tp, amt, t_before, tp1, amt))
                 con.commit()
                 con.close()
                 return False, "CRITICAL: SL fail and emergency close fail! Tracked as EMERGENCY_UNPROTECTED"
@@ -436,13 +481,13 @@ class Engine:
 
         con = self.db()
         cur = con.cursor()
-        cur.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
-                    "VALUES (?,?,?,?,?,?,?,?,'OPEN',?)",
-                    (bdt(), sym, name, side, entry, sl, tp, amt, t_before))
+        cur.execute("INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms,engine,tp1_hit,tp1_price,original_qty) "
+                    "VALUES (?,?,?,?,?,?,?,?,'OPEN',?,'RULE',0,?,?)",
+                    (bdt(), sym, name, side, entry, sl, tp, amt, t_before, tp1, amt))
         pos_id = cur.lastrowid
         con.commit()
         con.close()
-        log.info(f"OPENED {sym} {side} {name} | entry {entry} SL {sl} TP {tp} qty {amt}"
+        log.info(f"OPENED {sym} {side} {name} | entry {entry} SL {sl} TP1 {tp1} TP2 {tp} qty {amt}"
                  f"{'' if tp_ok else ' (TP missing)'}")
         try:
             from .notifier import send_trade_opened_alert
@@ -500,12 +545,13 @@ class Engine:
                     ent_px = float(pos_info[0].get("entryPrice") or 0.0) if pos_info else 0.0
                     st = "OPEN" if has_sl else "EMERGENCY_UNPROTECTED"
                     con.execute(
-                        "INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms) "
-                        "VALUES (?,?,'UNTRACKED_RECOVERED',?,?,0,0,?,?,?)",
-                        (bdt(), s, side, ent_px, abs(a), st, int(time.time() * 1000))
+                        "INSERT INTO positions (time,symbol,strategy,side,entry,sl,tp,qty,status,entry_ms,engine,tp1_hit,tp1_price,original_qty) "
+                        "VALUES (?,?,'UNTRACKED_RECOVERED',?,?,0,0,?,?,?,'RULE',0,0,?)",
+                        (bdt(), s, side, ent_px, abs(a), st, int(time.time() * 1000), abs(a))
                     )
                     con.commit()
                     log.info(f"Reconciled and tracked {s} into positions DB as {st}")
+
             for row in rows:
                 pid, sym, side, entry, sl, tp, ems, status = row
                 cur_amt = abs(amt.get(sym, 0.0))
@@ -524,6 +570,61 @@ class Engine:
                         log.critical(f"{sym}: sl <= 0 or cond order failed, trying emergency close...")
                         if self.emergency_close(sym, side, cur_amt):
                             self.close_row(con, pid, sym, side, entry, sl, tp, ems)
+                            continue
+
+                # Scaled Take Profit Check (Phase 4 Precision Architecture)
+                try:
+                    pos_row = con.execute("SELECT tp1_hit, tp1_price, original_qty FROM positions WHERE id=?", (pid,)).fetchone()
+                    tp1_hit = pos_row[0] if pos_row and pos_row[0] is not None else 0
+                    tp1_price = float(pos_row[1]) if pos_row and pos_row[1] is not None else 0.0
+                    orig_qty = float(pos_row[2]) if pos_row and pos_row[2] is not None else cur_amt
+
+                    if not tp1_hit and tp1_price > 0 and cur_amt > 0:
+                        bid, ask = self.book(sym)
+                        mid_px = (bid + ask) / 2
+                        hit_tp1 = (side == "LONG" and mid_px >= tp1_price) or (side == "SHORT" and mid_px <= tp1_price)
+                        if hit_tp1:
+                            info = self.info(sym)
+                            if info:
+                                step = Decimal(str(info[1]))
+                                minq = Decimal(str(info[2]))
+                                tick = Decimal(str(info[0]))
+                                # Close 50% of the position
+                                q_close = (Decimal(str(cur_amt / 2)) / step).to_integral_value(rounding=ROUND_DOWN) * step
+                                if q_close >= minq:
+                                    log.info(f"🎯 SCALED TP1 REACHED for {sym} {side}! Closing 50% ({q_close} {sym}) @ {mid_px:.5g}...")
+                                    cs = "SELL" if side == "LONG" else "BUY"
+                                    self.dc.market(sym, cs, q_close, reduce=True)
+                                    time.sleep(0.5)
+
+                                    # Cancel old SL and move Stop Loss to Breakeven (+ small buffer)
+                                    self.dc.cancel_conditionals(sym)
+                                    time.sleep(0.5)
+                                    k = 1 if side == "LONG" else -1
+                                    be_sl = rt(entry + k * abs(tp1_price - entry) * 0.05, tick)
+                                    self.try_cond(sym, cs, "STOP_MARKET", be_sl)
+
+                                    new_amt = float(Decimal(str(cur_amt)) - q_close)
+                                    con.execute(
+                                        "UPDATE positions SET tp1_hit=1, qty=?, sl=? WHERE id=?",
+                                        (new_amt, be_sl, pid)
+                                    )
+                                    con.commit()
+                                    log.info(f"✅ {sym}: 50% profit banked at TP1! Stop Loss moved to Breakeven ({be_sl}) - Runner is now RISK-FREE!")
+                                    try:
+                                        from .notifier import send_alert
+                                        send_alert(
+                                            f"🎯 *Scaled Take Profit 1 Executed!*\n"
+                                            f"• Symbol: `{sym}` ({side})\n"
+                                            f"• 50% Profit Banked at: `{mid_px:.5g}`\n"
+                                            f"• New SL: `{be_sl}` (Breakeven - 100% Risk Free Runner)\n"
+                                            f"• Remaining Size: `{new_amt}`"
+                                        )
+                                    except Exception as ne:
+                                        log.warning(f"Failed to send TP1 alert: {ne}")
+                except Exception as tpe:
+                    log.warning(f"Error checking scaled TP1 for {sym}: {tpe}")
+
         finally:
             con.close()
             m_con.close()
@@ -538,10 +639,12 @@ class Engine:
         cside = "SELL" if side == "LONG" else "BUY"
         cl = [t for t in tr if t["side"] == cside]
         self.dc.cancel_conditionals(sym)       # baki SL/TP leg muche dei
+        now_closed_ms = int(time.time() * 1000)
+
         if not cl:
             if time.time() * 1000 - ems > 600000:
-                con.execute("UPDATE positions SET status='CLOSED', result='UNKNOWN', closed=? WHERE id=?",
-                            (bdt(), pid))
+                con.execute("UPDATE positions SET status='CLOSED', result='UNKNOWN', closed=?, closed_ms=? WHERE id=?",
+                            (bdt(now_closed_ms), now_closed_ms, pid))
                 con.commit()
                 log.warning(f"{sym}: close trade pailam na, UNKNOWN mark kora holo")
             return
@@ -557,8 +660,8 @@ class Engine:
             res = "SL"
         else:
             res = "OTHER"
-        con.execute("UPDATE positions SET status='CLOSED', exit=?, pnl=?, fee=?, result=?, closed=? "
-                    "WHERE id=?", (ex, round(net, 4), round(fee, 4), res, bdt(), pid))
+        con.execute("UPDATE positions SET status='CLOSED', exit=?, pnl=?, fee=?, result=?, closed=?, closed_ms=? "
+                    "WHERE id=?", (ex, round(net, 4), round(fee, 4), res, bdt(now_closed_ms), now_closed_ms, pid))
         con.commit()
         log.info(f"CLOSED {sym} {side} {res} | exit {ex:.6g} | net {net:+.4f} USDT (fee {fee:.4f})")
         engine_type = "RULE"

@@ -33,9 +33,9 @@ def _view(d, side):
 
 
 def s_breakout(v, atr, volr, tb):
-    """Pure Breakout & Retest Strategy:
-    1. Retest of previously broken horizontal resistance/support level.
-    2. Direct strong high-volume breakout of 20-candle high.
+    """Pure Breakout & Retest Strategy (Phase 3/4 Enhanced):
+    1. Retest of previously broken horizontal resistance/support level with volume.
+    2. Direct strong high-volume breakout of 20-candle high with >= 1.5x volume expansion.
     """
     i = len(v["c"]) - 1
     c, o, h, l = v["c"][i], v["o"][i], v["h"][i], v["l"][i]
@@ -47,12 +47,12 @@ def s_breakout(v, atr, volr, tb):
     prior_break = (v["c"][i - 6:i] > lvl).any()
     retest_touch = l <= lvl + 0.3 * atr
     retest_hold = c >= lvl - 0.15 * atr
-    if prior_break and retest_touch and retest_hold and (c >= o or (c - l) >= 0.4 * max(h - l, 1e-9)):
+    if prior_break and retest_touch and retest_hold and volr >= 1.2 and (c >= o or (c - l) >= 0.4 * max(h - l, 1e-9)):
         return "breakout_retest", f"Retest of {abs(lvl):.6g}, vol x{volr:.1f}"
 
-    # Setup B: Direct Strong Breakout above 20-candle high with volume expansion
+    # Setup B: Direct Strong Breakout above 20-candle high with >= 1.5x volume expansion (Phase 3/4)
     level = v["h"][i - 20:i].max()
-    if c > level and c > o and volr >= 1.2 and (c - level) <= 2.0 * atr:
+    if c > level and c > o and volr >= 1.5 and (c - level) <= 2.0 * atr:
         return "breakout_retest", f"Breakout above {abs(level):.6g}, vol x{volr:.1f}"
 
     return None
@@ -92,14 +92,14 @@ def s_pullback(v, atr, volr, tb):
 
 
 def s_sweep(v, atr, volr, tb):
-    """Liquidity Sweep & Reclaim."""
+    """Liquidity Sweep & Reclaim (Phase 3/4 Enhanced with >= 1.5x volume expansion)."""
     i = len(v["c"]) - 1
     c, o, h, l = v["c"][i], v["o"][i], v["h"][i], v["l"][i]
     lvl = v["l"][i - 40:i - 1].min()
     rng = max(h - l, 1e-12)
     lower = min(o, c) - l
     if (l < lvl - 0.05 * atr and (lvl - l) <= 2.5 * atr and c > lvl
-            and lower >= 0.4 * rng and volr >= 1.3):
+            and lower >= 0.4 * rng and volr >= 1.5):
         return "liq_sweep", f"sweep of {abs(lvl):.6g} + reclaim, vol x{volr:.1f}"
     return None
 
